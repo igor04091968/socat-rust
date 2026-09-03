@@ -66,7 +66,7 @@ RUSTFLAGS='-C relocation-model=static' cargo build --release \
   --target x86_64-unknown-linux-musl
 ```
 
-Выпуск `v0.1.6` содержит такой бинарь под именем `socat-rust-centos5`.
+Выпуск `v0.1.7` содержит такой бинарь под именем `socat-rust-centos5`.
 CentOS 5 не использует systemd, поэтому relay нужно запускать через SysV init,
 supervisord или штатный механизм мониторинга процессов.
 
@@ -85,6 +85,21 @@ socat ... TCP4-LISTEN:8034,bind=10.34.0.1,su=2450034,fork,max-children=1,backlog
 maps to the `bnk2450034` example profile. `-lf` becomes `log_file`, `-v` is
 `verbose_payload_logging`, and `su=2450034` is represented by
 `User=2450034`/`Group=2450034` in the generated unit.
+
+The daemon also applies `uid` itself before creating the listener and the
+upstream socket. This is required on systems where firewall rules match the
+process UID. If the daemon is started by hand, start it as root so it can drop
+privileges, for example:
+
+```bash
+sudo ./socat-rust-centos5-v0.1.6 \
+  --config /etc/socat-rust/relays.toml --relay bnk2450034
+```
+
+The process then runs with effective UID/GID `2450034`; the log directory and
+configured log file must be writable by that account. Starting as the wrong
+non-root account is rejected instead of silently creating firewall traffic
+under the wrong UID.
 
 ## Safety notes
 

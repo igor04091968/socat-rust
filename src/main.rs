@@ -163,6 +163,65 @@ fn load_config(path: &Path) -> Result<Config> {
     Ok(config)
 }
 
+/// Apply the profile identity before opening any relay sockets.
+///
+/// This is intentionally done before constructing the Tokio runtime: on Linux
+/// the effective credentials used by the firewall must also be inherited by
+/// every runtime worker thread and every upstream connection.
+#[cfg(unix)]
+fn apply_configured_uid(relay: &RelayConfig) -> Result<()> {
+    let Some(uid) = relay.uid else {
+        return Ok(());
+    };
+    let current = unsafe { libc::geteuid() } as u32;
+    if current == uid {
+        return Ok(());
+    }
+    if current != 0 {
+        bail!(
+            "relay {} requires uid {}, but process runs as uid {}; start it as root or as the configured uid",
+            relay.name,
+            uid,
+            current
+        );
+    }
+
+    let gid = uid as libc::gid_t;
+    let uid = uid as libc::uid_t;
+    let clear_groups = unsafe { libc::setgroups(0, std::ptr::null()) };
+    if clear_groups != 0 {
+        return Err(std::io::Error::last_os_error())
+            .context("clear supplementary groups before uid drop");
+    }
+    if unsafe { libc::setgid(gid) } != 0 {
+        return Err(std::io::Error::last_os_error())
+            .with_context(|| format!("setgid({gid}) for relay {}", relay.name));
+    }
+    if unsafe { libc::setuid(uid) } != 0 {
+        return Err(std::io::Error::last_os_error())
+            .with_context(|| format!("setuid({uid}) for relay {}", relay.name));
+    }
+    let effective = unsafe { libc::geteuid() } as u32;
+    if effective != uid as u32 {
+        bail!(
+            "relay {}: uid drop verification failed (effective uid {effective})",
+            relay.name
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn apply_configured_uid(relay: &RelayConfig) -> Result<()> {
+    if relay.uid.is_some() {
+        bail!(
+            "relay {}: uid switching is supported only on Unix",
+            relay.name
+        );
+    }
+    Ok(())
+}
+
 fn init_logging(
     relay: &RelayConfig,
 ) -> Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
@@ -215,8 +274,7 @@ fn main() {
 }
 
 #[cfg(not(feature = "legacy-kernel"))]
-#[tokio::main]
-async fn async_main() -> Result<()> {
+fn async_main() -> Result<()> {
     let cli = Cli::parse();
     let config = load_config(&cli.config)?;
     if matches!(cli.command, Some(Command::ConfigCheck)) {
@@ -237,8 +295,13 @@ async fn async_main() -> Result<()> {
         .into_iter()
         .find(|item| item.name == relay_name)
         .with_context(|| format!("relay profile not found: {relay_name}"))?;
+    apply_configured_uid(&relay)?;
     let _log_guard = init_logging(&relay)?;
-    run_relay(relay).await
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("build Tokio runtime")?;
+    runtime.block_on(run_relay(relay))
 }
 
 #[cfg(feature = "legacy-kernel")]
@@ -263,6 +326,7 @@ fn legacy_main() -> Result<()> {
         .into_iter()
         .find(|item| item.name == name)
         .with_context(|| format!("relay profile not found: {name}"))?;
+    apply_configured_uid(&relay)?;
     let _log_guard = init_logging(&relay)?;
     legacy_run_relay(relay)
 }

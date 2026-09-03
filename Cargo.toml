@@ -1,6 +1,6 @@
 [package]
 name = "socat-rust"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 description = "Stable Linux TCP relay for Debian/systemd"
 license = "MIT"
@@ -11,6 +11,7 @@ legacy-kernel = []
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
+libc = "0.2"
 ipnet = { version = "2.11", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 socket2 = "0.6"
