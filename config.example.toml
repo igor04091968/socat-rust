@@ -1,0 +1,71 @@
+# One [[relay]] block per independent socat replacement.
+# Run each profile as a separate systemd service under its own UID.
+
+[[relay]]
+name = "bnk2450034"
+listen = "10.34.0.1:8034"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450034
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+connect_timeout_seconds = 10
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450034.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450036"
+listen = "10.34.0.1:8036"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450036
+max_connections = 2
+backlog = 1
+eof_grace_seconds = 1
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 60
+interval_seconds = 10
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 1800
+interval_seconds = 60
+count = 5
+
+[[relay]]
+name = "bnk2450022"
+listen = "10.34.0.1:8022"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450022
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 5
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
