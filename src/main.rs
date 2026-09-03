@@ -1,6 +1,8 @@
 #![cfg_attr(feature = "legacy-kernel", allow(dead_code, unused_imports))]
 
 use std::{
+    fs::{File, OpenOptions},
+    io::Write,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -25,8 +27,86 @@ struct Cli {
     config: PathBuf,
     #[arg(short, long)]
     relay: Option<String>,
+    /// Detach into the background and hold an exclusive per-relay lock.
+    #[arg(long, alias = "background")]
+    daemon: bool,
     #[command(subcommand)]
     command: Option<Command>,
+}
+
+#[cfg(unix)]
+struct DaemonGuard {
+    // The descriptor must remain open for the entire relay lifetime: closing
+    // it releases flock() and allows a duplicate process to start.
+    _lock: File,
+}
+
+#[cfg(unix)]
+fn daemonize(relay: &RelayConfig, enabled: bool) -> Result<Option<DaemonGuard>> {
+    if !enabled {
+        return Ok(None);
+    }
+
+    let lock_dir = Path::new("/var/run/socat-rust");
+    std::fs::create_dir_all(lock_dir)
+        .with_context(|| format!("create daemon lock directory {}", lock_dir.display()))?;
+    let lock_path = lock_dir.join(format!("{}.lock", relay.name));
+    let mut lock = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .with_context(|| format!("open daemon lock {}", lock_path.display()))?;
+    let fd = std::os::fd::AsRawFd::as_raw_fd(&lock);
+    if unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::EWOULDBLOCK) {
+            bail!(
+                "relay {} is already running (lock {})",
+                relay.name,
+                lock_path.display()
+            );
+        }
+        return Err(error).with_context(|| format!("lock {}", lock_path.display()));
+    }
+
+    // Fork before creating Tokio or opening relay sockets. The parent exits;
+    // the child keeps the lock and continues with UID setup and socket bind.
+    match unsafe { libc::fork() } {
+        -1 => return Err(std::io::Error::last_os_error()).context("fork daemon process"),
+        0 => {}
+        _parent_pid => std::process::exit(0),
+    }
+    if unsafe { libc::setsid() } < 0 {
+        return Err(std::io::Error::last_os_error()).context("create daemon session");
+    }
+    if unsafe { libc::chdir(c"/".as_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error()).context("change daemon directory");
+    }
+    unsafe { libc::umask(0o027) };
+
+    let null = std::fs::File::open("/dev/null").context("open /dev/null for daemon")?;
+    let null_fd = std::os::fd::AsRawFd::as_raw_fd(&null);
+    for target in [libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO] {
+        if unsafe { libc::dup2(null_fd, target) } < 0 {
+            return Err(std::io::Error::last_os_error()).context("redirect daemon stdio");
+        }
+    }
+
+    lock.set_len(0).context("reset daemon lock metadata")?;
+    writeln!(lock, "{}", std::process::id()).context("write daemon pid")?;
+    Ok(Some(DaemonGuard { _lock: lock }))
+}
+
+#[cfg(not(unix))]
+fn daemonize(relay: &RelayConfig, enabled: bool) -> Result<Option<()>> {
+    if enabled {
+        bail!(
+            "relay {}: daemon mode is supported only on Unix",
+            relay.name
+        );
+    }
+    Ok(None)
 }
 
 #[derive(Debug, Subcommand)]
@@ -298,6 +378,7 @@ fn async_main() -> Result<()> {
         .into_iter()
         .find(|item| item.name == relay_name)
         .with_context(|| format!("relay profile not found: {relay_name}"))?;
+    let _daemon_guard = daemonize(&relay, cli.daemon)?;
     // Один процесс = один relay = один UID. Это обязательная схема для
     // firewall-правил, которые различают трафик банкоматов по UID процесса.
     apply_configured_uid(&relay)?;
@@ -331,6 +412,7 @@ fn legacy_main() -> Result<()> {
         .into_iter()
         .find(|item| item.name == name)
         .with_context(|| format!("relay profile not found: {name}"))?;
+    let _daemon_guard = daemonize(&relay, cli.daemon)?;
     // Legacy-бинарь для CentOS 5 также запускается отдельным процессом на
     // каждый профиль. Стартуем от root, после чего безвозвратно переходим
     // на UID из конфигурации до bind/connect.

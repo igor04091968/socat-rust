@@ -86,8 +86,18 @@ RUSTFLAGS='-C relocation-model=static' cargo build --release \
 ```
 
 Выпуск `v0.1.7` содержит такой бинарь под именем `socat-rust-centos5`.
-CentOS 5 не использует systemd, поэтому relay нужно запускать через SysV init,
-supervisord или штатный механизм мониторинга процессов.
+CentOS 5 не использует systemd. Для ручного фонового запуска можно использовать
+`--daemon`; процесс создаёт `/var/run/socat-rust/<relay>.lock` и второй экземпляр
+того же relay не стартует:
+
+```bash
+sudo ./socat-rust-centos5-v0.1.7 --daemon \
+  --config /etc/socat-rust/relays.toml --relay bnk2450034
+```
+
+Для SysV init или supervisord фоновый режим включать не нужно: эти системы сами
+управляют foreground-процессом. Lock освобождается ядром автоматически при
+завершении процесса.
 
 Before enabling a profile, stop its old `socat` process and verify that the
 configured UID owns the log directory. Never enable both listeners on the same

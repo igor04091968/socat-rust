@@ -37,8 +37,8 @@ uid = 2450001
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450001.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450001.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -61,8 +61,8 @@ uid = 2450002
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450002.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450002.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -85,8 +85,8 @@ uid = 2450003
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450003.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450003.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -109,8 +109,8 @@ uid = 2450004
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450004.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450004.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -133,8 +133,8 @@ uid = 2450006
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450006.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450006.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -157,8 +157,8 @@ uid = 2450007
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450007.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450007.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -181,8 +181,8 @@ uid = 2450008
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450008.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450008.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -205,8 +205,8 @@ uid = 2450009
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450009.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450009.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -229,8 +229,8 @@ uid = 2450011
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450011.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450011.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -253,8 +253,8 @@ uid = 2450012
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450012.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450012.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -277,8 +277,8 @@ uid = 2450013
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450013.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450013.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -301,8 +301,8 @@ uid = 2450014
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450014.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450014.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -326,7 +326,7 @@ max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
 verbose_payload_logging = true
-log_file = "/var/log/socat-rust/bnk2450015.log"
+log_file = "/var/log/bnk2450015.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -349,8 +349,8 @@ uid = 2450016
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450016.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450016.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -373,8 +373,10 @@ uid = 2450017
 max_connections = 2
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450017.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450036.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450017.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -397,8 +399,8 @@ uid = 2450018
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 15
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450018.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450018.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -421,8 +423,8 @@ uid = 2450019
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450019.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450019.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -445,8 +447,8 @@ uid = 2450020
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450020.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450020.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -469,8 +471,8 @@ uid = 2450021
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450021.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450021.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -493,8 +495,8 @@ uid = 2450023
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450023.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450023.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -517,8 +519,8 @@ uid = 2450024
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450024.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450024.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -541,8 +543,8 @@ uid = 2450025
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450025.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450025.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -565,8 +567,8 @@ uid = 2450026
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450026.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450026.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -589,8 +591,8 @@ uid = 2450027
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450027.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450027.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -613,8 +615,8 @@ uid = 2450028
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450028.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450028.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -637,8 +639,8 @@ uid = 2450029
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450029.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450029.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -661,8 +663,8 @@ uid = 2450030
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450030.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450030.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -685,8 +687,8 @@ uid = 2450031
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450031.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450031.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -709,8 +711,8 @@ uid = 2450032
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450032.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450032.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -733,8 +735,8 @@ uid = 2450033
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450033.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450033.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -757,8 +759,8 @@ uid = 2450035
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450035.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450035.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -781,8 +783,8 @@ uid = 2450037
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 1
-verbose_payload_logging = false
-log_file = "/var/log/socat-rust/bnk2450037.log"
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450037.log"
 
 [relay.client_keepalive]
 enabled = true
@@ -828,6 +830,8 @@ uid = 2450022
 max_connections = 1
 backlog = 1
 eof_grace_seconds = 5
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450022.log"
 
 [relay.client_keepalive]
 enabled = true
