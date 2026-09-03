@@ -205,7 +205,6 @@ fn main() {
             eprintln!("Error: {error:#}");
             std::process::exit(1);
         }
-        return;
     }
 
     #[cfg(not(feature = "legacy-kernel"))]
@@ -325,11 +324,29 @@ fn legacy_handle_connection(
     let client_reader = client.try_clone()?;
     let upstream_reader = upstream.try_clone()?;
     let verbose = relay.verbose_payload_logging;
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let left_stop = std::sync::Arc::clone(&stop);
+    let right_stop = std::sync::Arc::clone(&stop);
+    let grace = std::time::Duration::from_secs(relay.eof_grace_seconds.max(1));
     let left = std::thread::spawn(move || {
-        legacy_copy(client_reader, upstream, verbose, "client_to_upstream")
+        legacy_copy(
+            client_reader,
+            upstream,
+            verbose,
+            "client_to_upstream",
+            left_stop,
+            grace,
+        )
     });
     let right = std::thread::spawn(move || {
-        legacy_copy(upstream_reader, client, verbose, "upstream_to_client")
+        legacy_copy(
+            upstream_reader,
+            client,
+            verbose,
+            "upstream_to_client",
+            right_stop,
+            grace,
+        )
     });
     left.join()
         .map_err(|_| anyhow::anyhow!("client direction panicked"))??;
@@ -386,13 +403,37 @@ fn legacy_copy(
     mut writer: std::net::TcpStream,
     verbose: bool,
     direction: &'static str,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    eof_grace: std::time::Duration,
 ) -> Result<u64> {
     use std::io::{Read, Write};
+    use std::sync::atomic::Ordering;
+    reader.set_read_timeout(Some(std::time::Duration::from_millis(100)))?;
     let mut buffer = [0_u8; 16 * 1024];
     let mut total = 0_u64;
+    let mut stop_deadline = None;
     loop {
-        let count = reader.read(&mut buffer)?;
+        let count = match reader.read(&mut buffer) {
+            Ok(count) => count,
+            Err(error)
+                if error.kind() == std::io::ErrorKind::WouldBlock
+                    || error.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                if stop.load(Ordering::Acquire)
+                    && stop_deadline
+                        .get_or_insert(std::time::Instant::now())
+                        .elapsed()
+                        >= eof_grace
+                {
+                    let _ = writer.shutdown(std::net::Shutdown::Write);
+                    return Ok(total);
+                }
+                continue;
+            }
+            Err(error) => return Err(error.into()),
+        };
         if count == 0 {
+            stop.store(true, Ordering::Release);
             let _ = writer.shutdown(std::net::Shutdown::Write);
             return Ok(total);
         }
