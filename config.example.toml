@@ -27,6 +27,775 @@ interval_seconds = 60
 count = 2
 
 [[relay]]
+name = "bnk2450001"
+listen = "10.34.0.1:8001"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450001
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450001.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450002"
+listen = "10.34.0.1:8002"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450002
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450002.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450003"
+listen = "10.34.0.1:8003"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450003
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450003.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450004"
+listen = "10.34.0.1:8004"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450004
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450004.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450006"
+listen = "10.34.0.1:8006"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450006
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450006.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450007"
+listen = "10.34.0.1:8007"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450007
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450007.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450008"
+listen = "10.34.0.1:8008"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450008
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450008.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450009"
+listen = "10.34.0.1:8009"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450009
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450009.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450011"
+listen = "10.34.0.1:8011"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450011
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450011.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450012"
+listen = "10.34.0.1:8012"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450012
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450012.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450013"
+listen = "10.34.0.1:8013"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450013
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450013.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450014"
+listen = "10.34.0.1:8014"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450014
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450014.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450015"
+listen = "10.34.0.1:8015"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450015
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = true
+log_file = "/var/log/socat-rust/bnk2450015.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450016"
+listen = "10.34.0.1:8016"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450016
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450016.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450017"
+listen = "10.34.0.1:8017"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450017
+max_connections = 2
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450017.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 60
+interval_seconds = 10
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 1800
+interval_seconds = 60
+count = 5
+
+[[relay]]
+name = "bnk2450018"
+listen = "10.34.0.1:8018"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450018
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 15
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450018.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 60
+count = 5
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 180
+interval_seconds = 120
+count = 5
+
+[[relay]]
+name = "bnk2450019"
+listen = "10.34.0.1:8019"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450019
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450019.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 120
+interval_seconds = 60
+count = 20
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 120
+interval_seconds = 60
+count = 20
+
+[[relay]]
+name = "bnk2450020"
+listen = "10.34.0.1:8020"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450020
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450020.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450021"
+listen = "10.34.0.1:8021"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450021
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450021.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450023"
+listen = "10.34.0.1:8023"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450023
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450023.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450024"
+listen = "10.34.0.1:8024"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450024
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450024.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450025"
+listen = "10.34.0.1:8025"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450025
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450025.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450026"
+listen = "10.34.0.1:8026"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450026
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450026.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450027"
+listen = "10.34.0.1:8027"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450027
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450027.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450028"
+listen = "10.34.0.1:8028"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450028
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450028.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450029"
+listen = "10.34.0.1:8029"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450029
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450029.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450030"
+listen = "10.34.0.1:8030"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450030
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450030.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450031"
+listen = "10.34.0.1:8031"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450031
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450031.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450032"
+listen = "10.34.0.1:8032"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450032
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450032.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450033"
+listen = "10.34.0.1:8033"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450033
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450033.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450035"
+listen = "10.34.0.1:8035"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450035
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450035.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+[[relay]]
+name = "bnk2450037"
+listen = "10.34.0.1:8037"
+allow = ["10.19.63.0/24"]
+upstream = "172.22.22.34:8000"
+uid = 2450037
+max_connections = 1
+backlog = 1
+eof_grace_seconds = 1
+verbose_payload_logging = false
+log_file = "/var/log/socat-rust/bnk2450037.log"
+
+[relay.client_keepalive]
+enabled = true
+idle_seconds = 15
+interval_seconds = 15
+count = 8
+
+[relay.upstream_keepalive]
+enabled = true
+idle_seconds = 150
+interval_seconds = 60
+count = 2
+
+
+[[relay]]
 name = "bnk2450036"
 listen = "10.34.0.1:8036"
 allow = ["10.19.63.0/24"]

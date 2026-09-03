@@ -1,6 +1,6 @@
 [package]
 name = "socat-rust"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Stable Linux TCP relay for Debian/systemd"
 license = "MIT"

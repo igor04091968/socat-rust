@@ -20,6 +20,12 @@ The daemon intentionally does not implement `su` internally. Each generated
 systemd unit runs directly as the configured UID, which avoids a shared root
 process and gives every relay independent restart and failure isolation.
 
+`config.example.toml` contains the currently observed `bnk2450001`–
+`bnk2450037` profiles (with missing ports omitted) and is deliberately
+configuration-driven: adding or changing a relay means editing one `[[relay]]`
+block and regenerating its systemd unit. The process list can therefore be
+extended without changing the Rust binary.
+
 ## Validate and run
 
 ```bash
