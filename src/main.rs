@@ -238,12 +238,18 @@ async fn run_relay(relay: RelayConfig) -> Result<()> {
         max_connections = relay.max_connections, backlog = relay.backlog,
         "relay listening");
 
+    let mut shutdown = Box::pin(shutdown_signal());
     loop {
         if slots.available_permits() == 0 {
-            sleep(Duration::from_millis(100)).await;
-            continue;
+            tokio::select! {
+                _ = &mut shutdown => break,
+                _ = sleep(Duration::from_millis(100)) => continue,
+            }
         }
-        let (client, peer) = listener.accept().await.context("accept client")?;
+        let (client, peer) = tokio::select! {
+            _ = &mut shutdown => break,
+            accepted = listener.accept() => accepted.context("accept client")?,
+        };
         let peer_ip = peer.ip();
         if !relay.allow.is_empty() && !relay.allow.iter().any(|network| network.contains(&peer_ip))
         {
@@ -267,6 +273,26 @@ async fn run_relay(relay: RelayConfig) -> Result<()> {
             }
         });
     }
+    info!(relay = %relay.name, "relay listener stopped");
+    Ok(())
+}
+
+#[cfg(unix)]
+async fn shutdown_signal() {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    let ctrl_c = tokio::signal::ctrl_c();
+    let mut terminate = signal(SignalKind::terminate()).expect("install SIGTERM handler");
+    tokio::select! {
+        _ = ctrl_c => info!("received Ctrl-C; shutting down"),
+        _ = terminate.recv() => info!("received SIGTERM; shutting down"),
+    }
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
+    info!("received Ctrl-C; shutting down");
 }
 
 async fn handle_connection(

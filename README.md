@@ -15,6 +15,7 @@ isolation.
 - upstream connect retry with bounded exponential backoff (`forever`);
 - optional payload logging (`-v`, disabled by default);
 - separate process and UID per relay profile through systemd.
+- корректное завершение по SIGTERM/Ctrl-C с прекращением приема новых соединений.
 
 The daemon intentionally does not implement `su` internally. Each generated
 systemd unit runs directly as the configured UID, which avoids a shared root
