@@ -62,10 +62,11 @@ cargo build --release --target x86_64-unknown-linux-musl
 
 ```bash
 RUSTFLAGS='-C relocation-model=static' cargo build --release \
+  --features legacy-kernel \
   --target x86_64-unknown-linux-musl
 ```
 
-Выпуск `v0.1.4` содержит такой бинарь под именем `socat-rust-centos5`.
+Выпуск `v0.1.5` содержит такой бинарь под именем `socat-rust-centos5`.
 CentOS 5 не использует systemd, поэтому relay нужно запускать через SysV init,
 supervisord или штатный механизм мониторинга процессов.
 

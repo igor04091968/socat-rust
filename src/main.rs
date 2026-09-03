@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "legacy-kernel", allow(dead_code, unused_imports))]
+
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -196,8 +198,26 @@ fn init_logging(
     }
 }
 
+fn main() {
+    #[cfg(feature = "legacy-kernel")]
+    {
+        if let Err(error) = legacy_main() {
+            eprintln!("Error: {error:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    #[cfg(not(feature = "legacy-kernel"))]
+    if let Err(error) = async_main() {
+        eprintln!("Error: {error:#}");
+        std::process::exit(1);
+    }
+}
+
+#[cfg(not(feature = "legacy-kernel"))]
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn async_main() -> Result<()> {
     let cli = Cli::parse();
     let config = load_config(&cli.config)?;
     if matches!(cli.command, Some(Command::ConfigCheck)) {
@@ -220,6 +240,168 @@ async fn main() -> Result<()> {
         .with_context(|| format!("relay profile not found: {relay_name}"))?;
     let _log_guard = init_logging(&relay)?;
     run_relay(relay).await
+}
+
+#[cfg(feature = "legacy-kernel")]
+fn legacy_main() -> Result<()> {
+    let cli = Cli::parse();
+    let config = load_config(&cli.config)?;
+    if matches!(cli.command, Some(Command::ConfigCheck)) {
+        for relay in &config.relay {
+            println!(
+                "OK {} listen={} upstream={}",
+                relay.name, relay.listen, relay.upstream
+            );
+        }
+        return Ok(());
+    }
+    let name = cli
+        .relay
+        .as_deref()
+        .context("--relay is required when starting a relay")?;
+    let relay = config
+        .relay
+        .into_iter()
+        .find(|item| item.name == name)
+        .with_context(|| format!("relay profile not found: {name}"))?;
+    let _log_guard = init_logging(&relay)?;
+    legacy_run_relay(relay)
+}
+
+#[cfg(feature = "legacy-kernel")]
+fn legacy_run_relay(relay: RelayConfig) -> Result<()> {
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let listen: std::net::SocketAddr = relay.listen.parse()?;
+    let socket = socket2::Socket::new(
+        socket2::Domain::IPV4,
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )?;
+    socket.set_reuse_address(true)?;
+    socket.bind(&listen.into())?;
+    socket.listen(relay.backlog as i32)?;
+    let listener: TcpListener = socket.into();
+    let active = std::sync::Arc::new(AtomicUsize::new(0));
+    info!(relay = %relay.name, listen = %relay.listen, upstream = %relay.upstream, "legacy relay listening");
+    for incoming in listener.incoming() {
+        let client = incoming.context("accept client")?;
+        let peer = client.peer_addr().context("read client peer address")?;
+        if active.load(Ordering::Acquire) >= relay.max_connections {
+            warn!(relay = %relay.name, peer = %peer, "client rejected: connection limit");
+            continue;
+        }
+        if !relay.allow.is_empty()
+            && !relay
+                .allow
+                .iter()
+                .any(|network| network.contains(&peer.ip()))
+        {
+            warn!(relay = %relay.name, peer = %peer, "client rejected by ACL");
+            continue;
+        }
+        active.fetch_add(1, Ordering::AcqRel);
+        let profile = relay.clone();
+        let active = std::sync::Arc::clone(&active);
+        std::thread::spawn(move || {
+            if let Err(error) = legacy_handle_connection(profile, client, peer) {
+                warn!(peer = %peer, error = %error, "legacy relay connection ended with error");
+            }
+            active.fetch_sub(1, Ordering::AcqRel);
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "legacy-kernel")]
+fn legacy_handle_connection(
+    relay: RelayConfig,
+    client: std::net::TcpStream,
+    peer: std::net::SocketAddr,
+) -> Result<()> {
+    legacy_configure_keepalive(&client, &relay.client_keepalive)?;
+    let upstream = legacy_connect_forever(&relay)?;
+    legacy_configure_keepalive(&upstream, &relay.upstream_keepalive)?;
+    let client_reader = client.try_clone()?;
+    let upstream_reader = upstream.try_clone()?;
+    let verbose = relay.verbose_payload_logging;
+    let left = std::thread::spawn(move || {
+        legacy_copy(client_reader, upstream, verbose, "client_to_upstream")
+    });
+    let right = std::thread::spawn(move || {
+        legacy_copy(upstream_reader, client, verbose, "upstream_to_client")
+    });
+    left.join()
+        .map_err(|_| anyhow::anyhow!("client direction panicked"))??;
+    right
+        .join()
+        .map_err(|_| anyhow::anyhow!("upstream direction panicked"))??;
+    info!(relay = %relay.name, peer = %peer, "legacy relay connection closed");
+    Ok(())
+}
+
+#[cfg(feature = "legacy-kernel")]
+fn legacy_connect_forever(relay: &RelayConfig) -> Result<std::net::TcpStream> {
+    let address: std::net::SocketAddr = relay.upstream.parse()?;
+    let timeout = std::time::Duration::from_secs(if relay.connect_timeout_seconds == 0 {
+        10
+    } else {
+        relay.connect_timeout_seconds
+    });
+    let mut delay = std::time::Duration::from_secs(1);
+    loop {
+        match std::net::TcpStream::connect_timeout(&address, timeout) {
+            Ok(stream) => return Ok(stream),
+            Err(error) => {
+                warn!(relay = %relay.name, upstream = %relay.upstream, %error, "upstream connect failed; retrying")
+            }
+        }
+        std::thread::sleep(delay);
+        delay = (delay * 2).min(std::time::Duration::from_secs(30));
+    }
+}
+
+#[cfg(feature = "legacy-kernel")]
+fn legacy_configure_keepalive(
+    stream: &std::net::TcpStream,
+    config: &KeepaliveConfig,
+) -> Result<()> {
+    if !config.enabled {
+        return Ok(());
+    }
+    let socket = socket2::SockRef::from(stream);
+    let keepalive = socket2::TcpKeepalive::new()
+        .with_time(std::time::Duration::from_secs(config.idle_seconds))
+        .with_interval(std::time::Duration::from_secs(config.interval_seconds))
+        .with_retries(config.count);
+    socket
+        .set_tcp_keepalive(&keepalive)
+        .context("set TCP keepalive")?;
+    Ok(())
+}
+
+#[cfg(feature = "legacy-kernel")]
+fn legacy_copy(
+    mut reader: std::net::TcpStream,
+    mut writer: std::net::TcpStream,
+    verbose: bool,
+    direction: &'static str,
+) -> Result<u64> {
+    use std::io::{Read, Write};
+    let mut buffer = [0_u8; 16 * 1024];
+    let mut total = 0_u64;
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            let _ = writer.shutdown(std::net::Shutdown::Write);
+            return Ok(total);
+        }
+        writer.write_all(&buffer[..count])?;
+        total += count as u64;
+        if verbose {
+            info!(direction, bytes = count, payload = %String::from_utf8_lossy(&buffer[..count]), "legacy relay data");
+        }
+    }
 }
 
 async fn run_relay(relay: RelayConfig) -> Result<()> {
