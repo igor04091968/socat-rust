@@ -63,7 +63,9 @@ struct RelayConfig {
     verbose_payload_logging: bool,
     #[serde(default)]
     log_file: Option<PathBuf>,
-    /// Applied by the systemd unit generator; the daemon itself must not run as root.
+    /// UID банкомата/relay. Firewall на целевой системе проверяет UID
+    /// исходящего upstream-соединения, поэтому каждый relay запускается
+    /// отдельным процессом со своим UID.
     #[serde(default)]
     uid: Option<u32>,
 }
@@ -163,11 +165,12 @@ fn load_config(path: &Path) -> Result<Config> {
     Ok(config)
 }
 
-/// Apply the profile identity before opening any relay sockets.
+/// Применяет UID профиля до открытия любых relay-сокетов.
 ///
-/// This is intentionally done before constructing the Tokio runtime: on Linux
-/// the effective credentials used by the firewall must also be inherited by
-/// every runtime worker thread and every upstream connection.
+/// Важно: это выполняется до создания Tokio runtime. На Linux credentials
+/// должны быть унаследованы всеми worker-потоками и upstream-соединениями.
+/// Нельзя сначала поднять общий runtime от root, а затем менять UID внутри
+/// async-кода: это может привести к разным credentials у потоков.
 #[cfg(unix)]
 fn apply_configured_uid(relay: &RelayConfig) -> Result<()> {
     let Some(uid) = relay.uid else {
@@ -295,6 +298,8 @@ fn async_main() -> Result<()> {
         .into_iter()
         .find(|item| item.name == relay_name)
         .with_context(|| format!("relay profile not found: {relay_name}"))?;
+    // Один процесс = один relay = один UID. Это обязательная схема для
+    // firewall-правил, которые различают трафик банкоматов по UID процесса.
     apply_configured_uid(&relay)?;
     let _log_guard = init_logging(&relay)?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -326,6 +331,9 @@ fn legacy_main() -> Result<()> {
         .into_iter()
         .find(|item| item.name == name)
         .with_context(|| format!("relay profile not found: {name}"))?;
+    // Legacy-бинарь для CentOS 5 также запускается отдельным процессом на
+    // каждый профиль. Стартуем от root, после чего безвозвратно переходим
+    // на UID из конфигурации до bind/connect.
     apply_configured_uid(&relay)?;
     let _log_guard = init_logging(&relay)?;
     legacy_run_relay(relay)
