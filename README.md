@@ -52,6 +52,23 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now socat-rust-bnk2450034.service
 ```
 
+Для старых CentOS без совместимой glibc используйте статическую сборку:
+
+```bash
+cargo build --release --target x86_64-unknown-linux-musl
+```
+
+Для CentOS 5 с ядром 2.6.18 используйте legacy-вариант без static-PIE:
+
+```bash
+RUSTFLAGS='-C relocation-model=static' cargo build --release \
+  --target x86_64-unknown-linux-musl
+```
+
+Выпуск `v0.1.4` содержит такой бинарь под именем `socat-rust-centos5`.
+CentOS 5 не использует systemd, поэтому relay нужно запускать через SysV init,
+supervisord или штатный механизм мониторинга процессов.
+
 Before enabling a profile, stop its old `socat` process and verify that the
 configured UID owns the log directory. Never enable both listeners on the same
 address/port.
