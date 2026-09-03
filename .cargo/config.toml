@@ -1,0 +1,12 @@
+# Build profiles used by the two deployment targets.
+# The musl relocation model keeps the CentOS 5 executable non-PIE and
+# compatible with the 2.6.18 kernel.
+
+[target.x86_64-unknown-linux-musl]
+rustflags = ["-C", "relocation-model=static"]
+
+[alias]
+build-debian = "build --release"
+build-centos5 = "build --release --features legacy-kernel --target x86_64-unknown-linux-musl"
+test-debian = "test"
+test-centos5 = "test --features legacy-kernel"

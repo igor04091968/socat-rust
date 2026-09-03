@@ -35,6 +35,25 @@ cargo run -- --config config.example.toml config-check
 cargo run -- --config config.example.toml --relay bnk2450034
 ```
 
+## Build profiles
+
+The project contains two RustRover run configurations and matching Cargo
+aliases:
+
+```bash
+# New Debian/Linux: Tokio implementation
+cargo build-debian
+# target/release/socat-rust
+
+# CentOS 5 / kernel 2.6.18: legacy blocking implementation, static musl
+cargo build-centos5
+# target/x86_64-unknown-linux-musl/release/socat-rust
+```
+
+In RustRover select `build_debian` or `build_centos5` in the Run
+configuration list. Both profiles use the same source and configuration
+format; only the runtime/build target differs.
+
 ## Install multiple relays
 
 Build and install the binary, copy a production config to
