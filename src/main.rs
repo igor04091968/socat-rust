@@ -21,13 +21,15 @@ use tokio::{
 use tracing::{info, warn};
 
 #[derive(Debug, Parser)]
-#[command(name = "socat-rust", version, about = "Stable Debian TCP relay")]
+#[command(name = "socat-rust", version, about = "Стабильный TCP-релей для Linux")]
 struct Cli {
+    // Конфигурация общая для всех relay. Параметр --relay выбирает ровно
+    // один профиль: это позволяет безопасно назначить ему отдельный UID.
     #[arg(short, long, default_value = "/etc/socat-rust/relays.toml")]
     config: PathBuf,
     #[arg(short, long)]
     relay: Option<String>,
-    /// Detach into the background and hold an exclusive per-relay lock.
+    /// Запустить relay в фоне и удерживать эксклюзивную блокировку профиля.
     #[arg(long, alias = "background")]
     daemon: bool,
     #[command(subcommand)]
@@ -36,8 +38,8 @@ struct Cli {
 
 #[cfg(unix)]
 struct DaemonGuard {
-    // The descriptor must remain open for the entire relay lifetime: closing
-    // it releases flock() and allows a duplicate process to start.
+    // Дескриптор должен оставаться открытым всё время работы relay. При его
+    // закрытии flock() освобождается, и второй экземпляр сможет запуститься.
     _lock: File,
 }
 
@@ -49,52 +51,56 @@ fn daemonize(relay: &RelayConfig, enabled: bool) -> Result<Option<DaemonGuard>> 
 
     let lock_dir = Path::new("/var/run/socat-rust");
     std::fs::create_dir_all(lock_dir)
-        .with_context(|| format!("create daemon lock directory {}", lock_dir.display()))?;
+        .with_context(|| format!("создать каталог блокировок daemon {}", lock_dir.display()))?;
     let lock_path = lock_dir.join(format!("{}.lock", relay.name));
+    // flock() надёжнее ручной проверки PID-файла: после падения процесса
+    // ядро само освобождает блокировку, и устаревший PID не мешает запуску.
     let mut lock = OpenOptions::new()
         .create(true)
         .read(true)
         .write(true)
         .open(&lock_path)
-        .with_context(|| format!("open daemon lock {}", lock_path.display()))?;
+        .with_context(|| format!("открыть блокировку daemon {}", lock_path.display()))?;
     let fd = std::os::fd::AsRawFd::as_raw_fd(&lock);
     if unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         let error = std::io::Error::last_os_error();
         if error.raw_os_error() == Some(libc::EWOULDBLOCK) {
             bail!(
-                "relay {} is already running (lock {})",
+                "relay {} уже запущен (захватить блокировку {})",
                 relay.name,
                 lock_path.display()
             );
         }
-        return Err(error).with_context(|| format!("lock {}", lock_path.display()));
+        return Err(error).with_context(|| format!("захватить блокировку {}", lock_path.display()));
     }
 
-    // Fork before creating Tokio or opening relay sockets. The parent exits;
-    // the child keeps the lock and continues with UID setup and socket bind.
+    // Fork выполняется до создания Tokio и открытия сокетов. Родительский
+    // процесс завершается, а дочерний сохраняет lock и продолжает настройку
+    // UID и bind. Это исключает второй экземпляр одного профиля.
     match unsafe { libc::fork() } {
-        -1 => return Err(std::io::Error::last_os_error()).context("fork daemon process"),
+        -1 => return Err(std::io::Error::last_os_error()).context("создать фоновый процесс fork"),
         0 => {}
         _parent_pid => std::process::exit(0),
     }
     if unsafe { libc::setsid() } < 0 {
-        return Err(std::io::Error::last_os_error()).context("create daemon session");
+        return Err(std::io::Error::last_os_error()).context("создать сессию daemon");
     }
     if unsafe { libc::chdir(c"/".as_ptr()) } != 0 {
-        return Err(std::io::Error::last_os_error()).context("change daemon directory");
+        return Err(std::io::Error::last_os_error()).context("сменить каталог daemon");
     }
     unsafe { libc::umask(0o027) };
 
-    let null = std::fs::File::open("/dev/null").context("open /dev/null for daemon")?;
+    let null = std::fs::File::open("/dev/null").context("открыть /dev/null для daemon")?;
     let null_fd = std::os::fd::AsRawFd::as_raw_fd(&null);
     for target in [libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO] {
         if unsafe { libc::dup2(null_fd, target) } < 0 {
-            return Err(std::io::Error::last_os_error()).context("redirect daemon stdio");
+            return Err(std::io::Error::last_os_error()).context("перенаправить stdio daemon");
         }
     }
 
-    lock.set_len(0).context("reset daemon lock metadata")?;
-    writeln!(lock, "{}", std::process::id()).context("write daemon pid")?;
+    lock.set_len(0)
+        .context("очистить данные блокировки daemon")?;
+    writeln!(lock, "{}", std::process::id()).context("записать PID daemon")?;
     Ok(Some(DaemonGuard { _lock: lock }))
 }
 
@@ -102,7 +108,7 @@ fn daemonize(relay: &RelayConfig, enabled: bool) -> Result<Option<DaemonGuard>> 
 fn daemonize(relay: &RelayConfig, enabled: bool) -> Result<Option<()>> {
     if enabled {
         bail!(
-            "relay {}: daemon mode is supported only on Unix",
+            "relay {}: режим daemon поддерживается только в Unix",
             relay.name
         );
     }
@@ -111,7 +117,7 @@ fn daemonize(relay: &RelayConfig, enabled: bool) -> Result<Option<()>> {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Validate every relay profile without opening sockets.
+    /// Проверить все профили relay без открытия сетевых сокетов.
     ConfigCheck,
 }
 
@@ -189,31 +195,34 @@ impl RelayConfig {
     fn validate(&self) -> Result<()> {
         if self.name.trim().is_empty() || self.name.contains('/') || self.name.contains(' ') {
             bail!(
-                "relay name must be a non-empty path-safe value: {:?}",
+                "имя relay должно быть непустым и безопасным для пути: {:?}",
                 self.name
             );
         }
         let listen = self
             .listen
             .parse::<std::net::SocketAddr>()
-            .with_context(|| format!("invalid listen address for {}", self.name))?;
+            .with_context(|| format!("неверный адрес listen для {}", self.name))?;
         if !listen.ip().is_ipv4() {
             bail!(
-                "{}: only IPv4 listen addresses are supported in v0.1",
+                "{}: в v0.1 поддерживаются только IPv4-адреса listen",
                 self.name
             );
         }
         self.upstream
             .parse::<std::net::SocketAddr>()
-            .with_context(|| format!("invalid upstream address for {}", self.name))?;
+            .with_context(|| format!("неверный адрес upstream для {}", self.name))?;
         if self.backlog == 0 || self.backlog > 65535 {
-            bail!("{}: backlog must be between 1 and 65535", self.name);
+            bail!("{}: backlog должен быть от 1 до 65535", self.name);
         }
         if self.max_connections == 0 {
-            bail!("{}: max_connections must be positive", self.name);
+            bail!("{}: max_connections должен быть положительным", self.name);
         }
         if self.uid == Some(0) {
-            bail!("{}: uid must be a non-root positive integer", self.name);
+            bail!(
+                "{}: uid должен быть положительным ненулевым числом",
+                self.name
+            );
         }
         for keepalive in [&self.client_keepalive, &self.upstream_keepalive] {
             if keepalive.enabled
@@ -221,7 +230,10 @@ impl RelayConfig {
                     || keepalive.interval_seconds == 0
                     || keepalive.count == 0)
             {
-                bail!("{}: enabled keepalive values must be positive", self.name);
+                bail!(
+                    "{}: включённые параметры keepalive должны быть положительными",
+                    self.name
+                );
             }
         }
         Ok(())
@@ -229,17 +241,18 @@ impl RelayConfig {
 }
 
 fn load_config(path: &Path) -> Result<Config> {
-    let raw = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    let config: Config =
-        toml::from_str(&raw).with_context(|| format!("parse {}", path.display()))?;
+    let raw =
+        std::fs::read_to_string(path).with_context(|| format!("прочитать {}", path.display()))?;
+    let config: Config = toml::from_str(&raw)
+        .with_context(|| format!("разобрать конфигурацию {}", path.display()))?;
     if config.relay.is_empty() {
-        bail!("{} contains no relay profiles", path.display());
+        bail!("{} не содержит профилей relay", path.display());
     }
     let mut names = std::collections::HashSet::new();
     for relay in &config.relay {
         relay.validate()?;
         if !names.insert(relay.name.clone()) {
-            bail!("duplicate relay name: {}", relay.name);
+            bail!("дублирующееся имя relay: {}", relay.name);
         }
     }
     Ok(config)
@@ -247,10 +260,14 @@ fn load_config(path: &Path) -> Result<Config> {
 
 /// Применяет UID профиля до открытия любых relay-сокетов.
 ///
-/// Важно: это выполняется до создания Tokio runtime. На Linux credentials
-/// должны быть унаследованы всеми worker-потоками и upstream-соединениями.
+/// Важно: это выполняется до создания Tokio runtime. На Linux учётные данные
+/// должны быть унаследованы всеми рабочими потоками и upstream-соединениями.
 /// Нельзя сначала поднять общий runtime от root, а затем менять UID внутри
-/// async-кода: это может привести к разным credentials у потоков.
+/// async-кода: это может привести к разным учётным данным у потоков.
+///
+/// Если процесс уже запущен под нужным UID, смена не выполняется. Если он
+/// запущен от root, дополнительно сбрасываются группы, затем устанавливаются
+/// GID и UID профиля. После этого вернуть привилегии невозможно.
 #[cfg(unix)]
 fn apply_configured_uid(relay: &RelayConfig) -> Result<()> {
     let Some(uid) = relay.uid else {
@@ -262,7 +279,7 @@ fn apply_configured_uid(relay: &RelayConfig) -> Result<()> {
     }
     if current != 0 {
         bail!(
-            "relay {} requires uid {}, but process runs as uid {}; start it as root or as the configured uid",
+            "relay {} требует uid {}, но процесс запущен с uid {}; запустите от root или нужного UID",
             relay.name,
             uid,
             current
@@ -274,20 +291,20 @@ fn apply_configured_uid(relay: &RelayConfig) -> Result<()> {
     let clear_groups = unsafe { libc::setgroups(0, std::ptr::null()) };
     if clear_groups != 0 {
         return Err(std::io::Error::last_os_error())
-            .context("clear supplementary groups before uid drop");
+            .context("очистить дополнительные группы перед сменой UID");
     }
     if unsafe { libc::setgid(gid) } != 0 {
         return Err(std::io::Error::last_os_error())
-            .with_context(|| format!("setgid({gid}) for relay {}", relay.name));
+            .with_context(|| format!("установить GID {gid} для relay {}", relay.name));
     }
     if unsafe { libc::setuid(uid) } != 0 {
         return Err(std::io::Error::last_os_error())
-            .with_context(|| format!("setuid({uid}) for relay {}", relay.name));
+            .with_context(|| format!("установить UID {uid} для relay {}", relay.name));
     }
     let effective = unsafe { libc::geteuid() } as u32;
     if effective != uid as u32 {
         bail!(
-            "relay {}: uid drop verification failed (effective uid {effective})",
+            "relay {}: проверка смены UID не пройдена (эффективный UID {effective})",
             relay.name
         );
     }
@@ -298,7 +315,7 @@ fn apply_configured_uid(relay: &RelayConfig) -> Result<()> {
 fn apply_configured_uid(relay: &RelayConfig) -> Result<()> {
     if relay.uid.is_some() {
         bail!(
-            "relay {}: uid switching is supported only on Unix",
+            "relay {}: смена UID поддерживается только в Unix",
             relay.name
         );
     }
@@ -308,15 +325,18 @@ fn apply_configured_uid(relay: &RelayConfig) -> Result<()> {
 fn init_logging(
     relay: &RelayConfig,
 ) -> Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
+    // Если RUST_LOG не задан, оставляем информационный уровень. Payload
+    // пишется только при verbose_payload_logging=true, поскольку может
+    // содержать платёжные данные и быстро увеличивать файл журнала.
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     if let Some(path) = &relay.log_file {
         let parent = path.parent().unwrap_or_else(|| Path::new("/"));
         std::fs::create_dir_all(parent)
-            .with_context(|| format!("create log directory {}", parent.display()))?;
+            .with_context(|| format!("создать каталог журнала {}", parent.display()))?;
         let filename = path
             .file_name()
-            .context("log_file must contain a filename")?
+            .context("log_file должен содержать имя файла")?
             .to_string_lossy()
             .into_owned();
         let appender = tracing_appender::rolling::never(parent, filename);
@@ -327,7 +347,7 @@ fn init_logging(
             .with_ansi(false)
             .with_writer(writer)
             .try_init()
-            .map_err(|error| anyhow!("initialize file logging: {error}"))?;
+            .map_err(|error| anyhow!("инициализировать файловый журнал: {error}"))?;
         Ok(Some(guard))
     } else {
         tracing_subscriber::fmt()
@@ -335,7 +355,7 @@ fn init_logging(
             .with_target(false)
             .with_ansi(false)
             .try_init()
-            .map_err(|error| anyhow!("initialize journald/stdout logging: {error}"))?;
+            .map_err(|error| anyhow!("инициализировать журнал journald/stdout: {error}"))?;
         Ok(None)
     }
 }
@@ -344,14 +364,14 @@ fn main() {
     #[cfg(feature = "legacy-kernel")]
     {
         if let Err(error) = legacy_main() {
-            eprintln!("Error: {error:#}");
+            eprintln!("Ошибка: {error:#}");
             std::process::exit(1);
         }
     }
 
     #[cfg(not(feature = "legacy-kernel"))]
     if let Err(error) = async_main() {
-        eprintln!("Error: {error:#}");
+        eprintln!("Ошибка: {error:#}");
         std::process::exit(1);
     }
 }
@@ -363,7 +383,7 @@ fn async_main() -> Result<()> {
     if matches!(cli.command, Some(Command::ConfigCheck)) {
         for relay in &config.relay {
             println!(
-                "OK {} listen={} upstream={}",
+                "ПРОВЕРЕНО: {} listen={} upstream={}",
                 relay.name, relay.listen, relay.upstream
             );
         }
@@ -377,7 +397,7 @@ fn async_main() -> Result<()> {
         .relay
         .into_iter()
         .find(|item| item.name == relay_name)
-        .with_context(|| format!("relay profile not found: {relay_name}"))?;
+        .with_context(|| format!("профиль relay не найден: {relay_name}"))?;
     let _daemon_guard = daemonize(&relay, cli.daemon)?;
     // Один процесс = один relay = один UID. Это обязательная схема для
     // firewall-правил, которые различают трафик банкоматов по UID процесса.
@@ -386,7 +406,7 @@ fn async_main() -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .context("build Tokio runtime")?;
+        .context("создать Tokio runtime")?;
     runtime.block_on(run_relay(relay))
 }
 
@@ -397,7 +417,7 @@ fn legacy_main() -> Result<()> {
     if matches!(cli.command, Some(Command::ConfigCheck)) {
         for relay in &config.relay {
             println!(
-                "OK {} listen={} upstream={}",
+                "ПРОВЕРЕНО: {} listen={} upstream={}",
                 relay.name, relay.listen, relay.upstream
             );
         }
@@ -411,11 +431,12 @@ fn legacy_main() -> Result<()> {
         .relay
         .into_iter()
         .find(|item| item.name == name)
-        .with_context(|| format!("relay profile not found: {name}"))?;
+        .with_context(|| format!("профиль relay не найден: {name}"))?;
     let _daemon_guard = daemonize(&relay, cli.daemon)?;
     // Legacy-бинарь для CentOS 5 также запускается отдельным процессом на
     // каждый профиль. Стартуем от root, после чего безвозвратно переходим
-    // на UID из конфигурации до bind/connect.
+    // на UID из конфигурации до bind/connect. Для запуска в фоне используйте
+    // --daemon; под supervisord/systemd этот флаг не нужен.
     apply_configured_uid(&relay)?;
     let _log_guard = init_logging(&relay)?;
     legacy_run_relay(relay)
@@ -423,6 +444,9 @@ fn legacy_main() -> Result<()> {
 
 #[cfg(feature = "legacy-kernel")]
 fn legacy_run_relay(relay: RelayConfig) -> Result<()> {
+    // Legacy-режим специально использует std::thread и блокирующие TCP API.
+    // Это исключает зависимость от возможностей старого ядра CentOS 5 и
+    // оставляет поведение близким к классическому socat.
     use std::net::TcpListener;
     use std::sync::atomic::{AtomicUsize, Ordering};
     let listen: std::net::SocketAddr = relay.listen.parse()?;
@@ -436,12 +460,12 @@ fn legacy_run_relay(relay: RelayConfig) -> Result<()> {
     socket.listen(relay.backlog as i32)?;
     let listener: TcpListener = socket.into();
     let active = std::sync::Arc::new(AtomicUsize::new(0));
-    info!(relay = %relay.name, listen = %relay.listen, upstream = %relay.upstream, "legacy relay listening");
+    info!(relay = %relay.name, listen = %relay.listen, upstream = %relay.upstream, "legacy relay слушает входящий порт");
     for incoming in listener.incoming() {
-        let client = incoming.context("accept client")?;
-        let peer = client.peer_addr().context("read client peer address")?;
+        let client = incoming.context("принять клиентское соединение")?;
+        let peer = client.peer_addr().context("получить адрес клиента")?;
         if active.load(Ordering::Acquire) >= relay.max_connections {
-            warn!(relay = %relay.name, peer = %peer, "client rejected: connection limit");
+            warn!(relay = %relay.name, peer = %peer, "клиент отклонён: достигнут лимит соединений");
             continue;
         }
         if !relay.allow.is_empty()
@@ -450,7 +474,7 @@ fn legacy_run_relay(relay: RelayConfig) -> Result<()> {
                 .iter()
                 .any(|network| network.contains(&peer.ip()))
         {
-            warn!(relay = %relay.name, peer = %peer, "client rejected by ACL");
+            warn!(relay = %relay.name, peer = %peer, "клиент отклонён правилом ACL");
             continue;
         }
         active.fetch_add(1, Ordering::AcqRel);
@@ -458,7 +482,7 @@ fn legacy_run_relay(relay: RelayConfig) -> Result<()> {
         let active = std::sync::Arc::clone(&active);
         std::thread::spawn(move || {
             if let Err(error) = legacy_handle_connection(profile, client, peer) {
-                warn!(peer = %peer, error = %error, "legacy relay connection ended with error");
+                warn!(peer = %peer, error = %error, "соединение legacy relay завершилось с ошибкой");
             }
             active.fetch_sub(1, Ordering::AcqRel);
         });
@@ -487,7 +511,7 @@ fn legacy_handle_connection(
             client_reader,
             upstream,
             verbose,
-            "client_to_upstream",
+            "клиент -> upstream",
             left_stop,
             grace,
         )
@@ -497,17 +521,17 @@ fn legacy_handle_connection(
             upstream_reader,
             client,
             verbose,
-            "upstream_to_client",
+            "upstream -> клиент",
             right_stop,
             grace,
         )
     });
     left.join()
-        .map_err(|_| anyhow::anyhow!("client direction panicked"))??;
+        .map_err(|_| anyhow::anyhow!("поток клиентского направления аварийно завершился"))??;
     right
         .join()
-        .map_err(|_| anyhow::anyhow!("upstream direction panicked"))??;
-    info!(relay = %relay.name, peer = %peer, "legacy relay connection closed");
+        .map_err(|_| anyhow::anyhow!("поток upstream-направления аварийно завершился"))??;
+    info!(relay = %relay.name, peer = %peer, "соединение legacy relay закрыто");
     Ok(())
 }
 
@@ -524,7 +548,7 @@ fn legacy_connect_forever(relay: &RelayConfig) -> Result<std::net::TcpStream> {
         match std::net::TcpStream::connect_timeout(&address, timeout) {
             Ok(stream) => return Ok(stream),
             Err(error) => {
-                warn!(relay = %relay.name, upstream = %relay.upstream, %error, "upstream connect failed; retrying")
+                warn!(relay = %relay.name, upstream = %relay.upstream, %error, "ошибка подключения к upstream; повторная попытка")
             }
         }
         std::thread::sleep(delay);
@@ -547,7 +571,7 @@ fn legacy_configure_keepalive(
         .with_retries(config.count);
     socket
         .set_tcp_keepalive(&keepalive)
-        .context("set TCP keepalive")?;
+        .context("настроить TCP keepalive")?;
     Ok(())
 }
 
@@ -562,6 +586,8 @@ fn legacy_copy(
 ) -> Result<u64> {
     use std::io::{Read, Write};
     use std::sync::atomic::Ordering;
+    // Короткий тайм-аут чтения нужен, чтобы после EOF второго направления
+    // корректно выдержать eof_grace и закрыть половину TCP-соединения.
     reader.set_read_timeout(Some(std::time::Duration::from_millis(100)))?;
     let mut buffer = [0_u8; 16 * 1024];
     let mut total = 0_u64;
@@ -594,14 +620,14 @@ fn legacy_copy(
         writer.write_all(&buffer[..count])?;
         total += count as u64;
         if verbose {
-            info!(direction, bytes = count, payload = %String::from_utf8_lossy(&buffer[..count]), "legacy relay data");
+            info!(direction, bytes = count, payload = %String::from_utf8_lossy(&buffer[..count]), "данные relay");
         }
     }
 }
 
 async fn run_relay(relay: RelayConfig) -> Result<()> {
     let listen_addr: std::net::SocketAddr =
-        relay.listen.parse().context("parse listener address")?;
+        relay.listen.parse().context("разобрать адрес listen")?;
     let socket = if listen_addr.ip().is_ipv4() {
         TcpSocket::new_v4()?
     } else {
@@ -613,7 +639,7 @@ async fn run_relay(relay: RelayConfig) -> Result<()> {
     let slots = Arc::new(Semaphore::new(relay.max_connections));
     info!(relay = %relay.name, listen = %relay.listen, upstream = %relay.upstream,
         max_connections = relay.max_connections, backlog = relay.backlog,
-        "relay listening");
+        "relay слушает входящий порт");
 
     let mut shutdown = Box::pin(shutdown_signal());
     loop {
@@ -625,19 +651,19 @@ async fn run_relay(relay: RelayConfig) -> Result<()> {
         }
         let (client, peer) = tokio::select! {
             _ = &mut shutdown => break,
-            accepted = listener.accept() => accepted.context("accept client")?,
+            accepted = listener.accept() => accepted.context("принять клиентское соединение")?,
         };
         let peer_ip = peer.ip();
         if !relay.allow.is_empty() && !relay.allow.iter().any(|network| network.contains(&peer_ip))
         {
-            warn!(relay = %relay.name, peer = %peer, "client rejected by ACL");
+            warn!(relay = %relay.name, peer = %peer, "клиент отклонён правилом ACL");
             drop(client);
             continue;
         }
         let permit = match slots.clone().try_acquire_owned() {
             Ok(permit) => permit,
             Err(_) => {
-                warn!(relay = %relay.name, peer = %peer, "client rejected: connection limit");
+                warn!(relay = %relay.name, peer = %peer, "клиент отклонён: достигнут лимит соединений");
                 drop(client);
                 continue;
             }
@@ -646,11 +672,11 @@ async fn run_relay(relay: RelayConfig) -> Result<()> {
         tokio::spawn(async move {
             let _permit = permit;
             if let Err(error) = handle_connection(profile, client, peer).await {
-                warn!(peer = %peer, error = %error, "relay connection ended with error");
+                warn!(peer = %peer, error = %error, "соединение relay завершилось с ошибкой");
             }
         });
     }
-    info!(relay = %relay.name, "relay listener stopped");
+    info!(relay = %relay.name, "приёмник relay остановлен");
     Ok(())
 }
 
@@ -659,17 +685,17 @@ async fn shutdown_signal() {
     use tokio::signal::unix::{SignalKind, signal};
 
     let ctrl_c = tokio::signal::ctrl_c();
-    let mut terminate = signal(SignalKind::terminate()).expect("install SIGTERM handler");
+    let mut terminate = signal(SignalKind::terminate()).expect("установить обработчик SIGTERM");
     tokio::select! {
-        _ = ctrl_c => info!("received Ctrl-C; shutting down"),
-        _ = terminate.recv() => info!("received SIGTERM; shutting down"),
+        _ = ctrl_c => info!("получен Ctrl-C; завершение работы"),
+        _ = terminate.recv() => info!("получен SIGTERM; завершение работы"),
     }
 }
 
 #[cfg(not(unix))]
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
-    info!("received Ctrl-C; shutting down");
+    info!("получен Ctrl-C; завершение работы");
 }
 
 async fn handle_connection(
@@ -678,7 +704,7 @@ async fn handle_connection(
     peer: std::net::SocketAddr,
 ) -> Result<()> {
     configure_keepalive(&client, &relay.client_keepalive)?;
-    info!(relay = %relay.name, peer = %peer, "client accepted");
+    info!(relay = %relay.name, peer = %peer, "клиент подключён");
     let upstream = connect_forever(&relay).await?;
     configure_keepalive(&upstream, &relay.upstream_keepalive)?;
     let (client_reader, client_writer) = client.into_split();
@@ -687,29 +713,29 @@ async fn handle_connection(
         client_reader,
         upstream_writer,
         relay.verbose_payload_logging,
-        "client_to_upstream",
+        "клиент -> upstream",
     ));
     let mut upstream_to_client = tokio::spawn(relay_direction(
         upstream_reader,
         client_writer,
         relay.verbose_payload_logging,
-        "upstream_to_client",
+        "upstream -> клиент",
     ));
     tokio::select! {
         result = &mut client_to_upstream => {
             if timeout(Duration::from_secs(relay.eof_grace_seconds), &mut upstream_to_client).await.is_err() {
                 upstream_to_client.abort();
             }
-            result.context("client to upstream task")?.context("client to upstream copy")?;
+            result.context("задача клиент -> upstream")?.context("копирование клиент -> upstream")?;
         }
         result = &mut upstream_to_client => {
             if timeout(Duration::from_secs(relay.eof_grace_seconds), &mut client_to_upstream).await.is_err() {
                 client_to_upstream.abort();
             }
-            result.context("upstream to client task")?.context("upstream to client copy")?;
+            result.context("задача upstream -> клиент")?.context("копирование upstream -> клиент")?;
         }
     }
-    info!(relay = %relay.name, peer = %peer, "relay connection closed");
+    info!(relay = %relay.name, peer = %peer, "соединение relay закрыто");
     Ok(())
 }
 
@@ -728,14 +754,14 @@ async fn connect_forever(relay: &RelayConfig) -> Result<TcpStream> {
         .await
         {
             Ok(Ok(stream)) => {
-                info!(relay = %relay.name, upstream = %relay.upstream, "upstream connected");
+                info!(relay = %relay.name, upstream = %relay.upstream, "upstream подключён");
                 return Ok(stream);
             }
             Ok(Err(error)) => {
-                warn!(relay = %relay.name, upstream = %relay.upstream, %error, "upstream connect failed; retrying")
+                warn!(relay = %relay.name, upstream = %relay.upstream, %error, "ошибка подключения к upstream; повторная попытка")
             }
             Err(_) => {
-                warn!(relay = %relay.name, upstream = %relay.upstream, timeout_seconds, "upstream connect timed out; retrying")
+                warn!(relay = %relay.name, upstream = %relay.upstream, timeout_seconds, "истёк тайм-аут подключения к upstream; повторная попытка")
             }
         }
         sleep(delay).await;
@@ -754,7 +780,7 @@ fn configure_keepalive(stream: &TcpStream, config: &KeepaliveConfig) -> Result<(
         .with_retries(config.count);
     socket
         .set_tcp_keepalive(&keepalive)
-        .context("set TCP keepalive")?;
+        .context("настроить TCP keepalive")?;
     Ok(())
 }
 
@@ -778,9 +804,9 @@ where
         tokio::io::AsyncWriteExt::write_all(writer, &buffer[..count]).await?;
         total += count as u64;
         if verbose {
-            info!(direction, bytes = count, payload = %String::from_utf8_lossy(&buffer[..count]), "relay data");
+            info!(direction, bytes = count, payload = %String::from_utf8_lossy(&buffer[..count]), "данные relay");
         } else {
-            tracing::debug!(direction, bytes = count, "relay data");
+            tracing::debug!(direction, bytes = count, "передача данных relay");
         }
     }
 }
