@@ -8,6 +8,9 @@ use std::{
     time::Duration,
 };
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use ipnet::IpNet;
@@ -326,6 +329,52 @@ fn apply_configured_uid(relay: &RelayConfig) -> Result<()> {
     Ok(())
 }
 
+/// Подготавливает файл журнала до сброса UID процесса.
+///
+/// Для каталогов вроде /var/log relay уже не может создать файл после
+/// setuid(). Поэтому root создаёт файл заранее, назначает владельцем UID
+/// relay и устанавливает права 0640. Бинарник не вызывает sudo сам: sudo
+/// должен быть применён к команде запуска.
+#[cfg(unix)]
+fn prepare_log_file(relay: &RelayConfig) -> Result<()> {
+    let Some(path) = &relay.log_file else {
+        return Ok(());
+    };
+    let Some(uid) = relay.uid else {
+        return Ok(());
+    };
+    let euid = unsafe { libc::geteuid() } as u32;
+    if euid != 0 && euid != uid {
+        bail!(
+            "relay {}: файл журнала {} требует запуска через sudo для подготовки прав",
+            relay.name,
+            path.display()
+        );
+    }
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("создать каталог журнала {}", parent.display()))?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .with_context(|| format!("создать или открыть файл журнала {}", path.display()))?;
+    let fd = std::os::fd::AsRawFd::as_raw_fd(&file);
+    if euid == 0 && unsafe { libc::fchown(fd, uid, !0 as libc::gid_t) } != 0 {
+        return Err(std::io::Error::last_os_error())
+            .with_context(|| format!("назначить владельца UID {uid} для {}", path.display()));
+    }
+    file.set_permissions(std::fs::Permissions::from_mode(0o640))
+        .with_context(|| format!("назначить права 0640 для {}", path.display()))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn prepare_log_file(_relay: &RelayConfig) -> Result<()> {
+    Ok(())
+}
+
 #[cfg(not(unix))]
 fn apply_configured_uid(relay: &RelayConfig) -> Result<()> {
     if relay.uid.is_some() {
@@ -413,6 +462,7 @@ fn async_main() -> Result<()> {
         .into_iter()
         .find(|item| item.name == relay_name)
         .with_context(|| format!("профиль relay не найден: {relay_name}"))?;
+    prepare_log_file(&relay)?;
     let _daemon_guard = daemonize(&relay, cli.daemon)?;
     // Один процесс = один relay = один UID. Это обязательная схема для
     // firewall-правил, которые различают трафик банкоматов по UID процесса.
@@ -451,6 +501,7 @@ fn legacy_main() -> Result<()> {
         .into_iter()
         .find(|item| item.name == name)
         .with_context(|| format!("профиль relay не найден: {name}"))?;
+    prepare_log_file(&relay)?;
     let _daemon_guard = daemonize(&relay, cli.daemon)?;
     // Legacy-бинарь для CentOS 5 также запускается отдельным процессом на
     // каждый профиль. Стартуем от root, после чего безвозвратно переходим
@@ -486,6 +537,12 @@ fn legacy_run_relay(relay: RelayConfig) -> Result<()> {
         .listen(relay.backlog as i32)
         .with_context(|| format!("запустить прослушивание {}", relay.listen))?;
     let listener: TcpListener = socket.into();
+    // Явно включаем blocking-режим. Если listener окажется non-blocking,
+    // std::net::TcpListener::incoming() будет получать EAGAIN и крутиться
+    // без ожидания, занимая почти 100% CPU в простое.
+    listener
+        .set_nonblocking(false)
+        .context("включить blocking-режим listener")?;
     let active = std::sync::Arc::new(AtomicUsize::new(0));
     info!(relay = %relay.name, listen = %relay.listen, upstream = %relay.upstream, "legacy relay слушает входящий порт");
     for incoming in listener.incoming() {
