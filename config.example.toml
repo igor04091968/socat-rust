@@ -303,6 +303,7 @@ backlog = 1
 eof_grace_seconds = 1
 verbose_payload_logging = true
 log_file = "/var/log/bnk2450014.log"
+pid_file = "/tmp/bnk2450014.lock"
 
 [relay.client_keepalive]
 enabled = true

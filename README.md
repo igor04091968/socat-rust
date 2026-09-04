@@ -130,6 +130,15 @@ configured log file must be writable by that account. Starting as the wrong
 non-root account is rejected instead of silently creating firewall traffic
 under the wrong UID.
 
+Для совместимости с существующим Monit можно задать `pid_file`, например
+`pid_file = "/tmp/bnk2450014.lock"`. Файл содержит PID и одновременно
+удерживается через kernel lock. Старый PID после падения не препятствует
+повторному запуску: блокировка освобождается ядром автоматически.
+
+Проверку Monit `if children > 1` для `socat-rust` переносить не следует:
+relay использует потоки, а не дочерние процессы. Ограничение соединений
+задаётся параметром `max_connections`.
+
 ## Safety notes
 
 Payload logging can expose credentials and personal data and can grow logs

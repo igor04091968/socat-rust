@@ -45,14 +45,17 @@ struct DaemonGuard {
 
 #[cfg(unix)]
 fn daemonize(relay: &RelayConfig, enabled: bool) -> Result<Option<DaemonGuard>> {
-    if !enabled {
-        return Ok(None);
+    let lock_path = relay
+        .pid_file
+        .clone()
+        .unwrap_or_else(|| Path::new("/var/run/socat-rust").join(format!("{}.lock", relay.name)));
+    if let Some(parent) = lock_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("создать каталог блокировок {}", parent.display()))?;
     }
-
-    let lock_dir = Path::new("/var/run/socat-rust");
-    std::fs::create_dir_all(lock_dir)
-        .with_context(|| format!("создать каталог блокировок daemon {}", lock_dir.display()))?;
-    let lock_path = lock_dir.join(format!("{}.lock", relay.name));
     // flock() надёжнее ручной проверки PID-файла: после падения процесса
     // ядро само освобождает блокировку, и устаревший PID не мешает запуску.
     let mut lock = OpenOptions::new()
@@ -72,6 +75,14 @@ fn daemonize(relay: &RelayConfig, enabled: bool) -> Result<Option<DaemonGuard>> 
             );
         }
         return Err(error).with_context(|| format!("захватить блокировку {}", lock_path.display()));
+    }
+
+    // В foreground lock также удерживается, но fork/setsid и перенаправление
+    // stdio не выполняются: диагностические ошибки должны быть видны в терминале.
+    if !enabled {
+        lock.set_len(0).context("очистить данные блокировки")?;
+        writeln!(lock, "{}", std::process::id()).context("записать PID")?;
+        return Ok(Some(DaemonGuard { _lock: lock }));
     }
 
     // Fork выполняется до создания Tokio и открытия сокетов. Родительский
@@ -149,6 +160,10 @@ struct RelayConfig {
     verbose_payload_logging: bool,
     #[serde(default)]
     log_file: Option<PathBuf>,
+    /// PID-файл и lock-файл для Monit/старых init-скриптов.
+    /// Если поле не задано, используется /var/run/socat-rust/<имя>.lock.
+    #[serde(default)]
+    pid_file: Option<PathBuf>,
     /// UID банкомата/relay. Firewall на целевой системе проверяет UID
     /// исходящего upstream-соединения, поэтому каждый relay запускается
     /// отдельным процессом со своим UID.
