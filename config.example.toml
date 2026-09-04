@@ -374,8 +374,6 @@ max_connections = 2
 backlog = 1
 eof_grace_seconds = 1
 verbose_payload_logging = true
-log_file = "/var/log/bnk2450036.log"
-verbose_payload_logging = true
 log_file = "/var/log/bnk2450017.log"
 
 [relay.client_keepalive]
@@ -808,6 +806,8 @@ uid = 2450036
 max_connections = 2
 backlog = 1
 eof_grace_seconds = 1
+verbose_payload_logging = true
+log_file = "/var/log/bnk2450036.log"
 
 [relay.client_keepalive]
 enabled = true
