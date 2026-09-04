@@ -18,7 +18,7 @@ use tokio::{
     sync::Semaphore,
     time::{sleep, timeout},
 };
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 #[derive(Debug, Parser)]
 #[command(name = "socat-rust", version, about = "Стабильный TCP-релей для Linux")]
@@ -407,7 +407,11 @@ fn async_main() -> Result<()> {
         .enable_all()
         .build()
         .context("создать Tokio runtime")?;
-    runtime.block_on(run_relay(relay))
+    let result = runtime.block_on(run_relay(relay));
+    if let Err(error) = &result {
+        error!(error = %error, "ошибка работы relay");
+    }
+    result
 }
 
 #[cfg(feature = "legacy-kernel")]
@@ -439,7 +443,11 @@ fn legacy_main() -> Result<()> {
     // --daemon; под supervisord/systemd этот флаг не нужен.
     apply_configured_uid(&relay)?;
     let _log_guard = init_logging(&relay)?;
-    legacy_run_relay(relay)
+    let result = legacy_run_relay(relay);
+    if let Err(error) = &result {
+        error!(error = %error, "ошибка работы relay");
+    }
+    result
 }
 
 #[cfg(feature = "legacy-kernel")]
@@ -456,8 +464,12 @@ fn legacy_run_relay(relay: RelayConfig) -> Result<()> {
         Some(socket2::Protocol::TCP),
     )?;
     socket.set_reuse_address(true)?;
-    socket.bind(&listen.into())?;
-    socket.listen(relay.backlog as i32)?;
+    socket
+        .bind(&listen.into())
+        .with_context(|| format!("занять адрес listen {}", relay.listen))?;
+    socket
+        .listen(relay.backlog as i32)
+        .with_context(|| format!("запустить прослушивание {}", relay.listen))?;
     let listener: TcpListener = socket.into();
     let active = std::sync::Arc::new(AtomicUsize::new(0));
     info!(relay = %relay.name, listen = %relay.listen, upstream = %relay.upstream, "legacy relay слушает входящий порт");
@@ -634,8 +646,12 @@ async fn run_relay(relay: RelayConfig) -> Result<()> {
         TcpSocket::new_v6()?
     };
     socket.set_reuseaddr(true)?;
-    socket.bind(listen_addr)?;
-    let listener = socket.listen(relay.backlog)?;
+    socket
+        .bind(listen_addr)
+        .with_context(|| format!("занять адрес listen {}", relay.listen))?;
+    let listener = socket
+        .listen(relay.backlog)
+        .with_context(|| format!("запустить прослушивание {}", relay.listen))?;
     let slots = Arc::new(Semaphore::new(relay.max_connections));
     info!(relay = %relay.name, listen = %relay.listen, upstream = %relay.upstream,
         max_connections = relay.max_connections, backlog = relay.backlog,
