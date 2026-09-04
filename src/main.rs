@@ -398,21 +398,47 @@ fn init_logging(
         let parent = path.parent().unwrap_or_else(|| Path::new("/"));
         std::fs::create_dir_all(parent)
             .with_context(|| format!("создать каталог журнала {}", parent.display()))?;
+        #[cfg(not(feature = "legacy-kernel"))]
         let filename = path
             .file_name()
             .context("log_file должен содержать имя файла")?
             .to_string_lossy()
             .into_owned();
-        let appender = tracing_appender::rolling::never(parent, filename);
-        let (writer, guard) = tracing_appender::non_blocking(appender);
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_target(false)
-            .with_ansi(false)
-            .with_writer(writer)
-            .try_init()
-            .map_err(|error| anyhow!("инициализировать файловый журнал: {error}"))?;
-        Ok(Some(guard))
+
+        // Ядро CentOS 5 (2.6.18) не поддерживает FUTEX_WAIT_BITSET и
+        // возвращает ENOSYS. Фоновый non-blocking worker tracing-appender
+        // на таком ядре начинает busy-loop. Для legacy-сборки используем
+        // синхронную запись напрямую в файл и не создаём worker-поток.
+        #[cfg(feature = "legacy-kernel")]
+        {
+            let writer = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .with_context(|| format!("открыть файл журнала {}", path.display()))?;
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_target(false)
+                .with_ansi(false)
+                .with_writer(writer)
+                .try_init()
+                .map_err(|error| anyhow!("инициализировать файловый журнал: {error}"))?;
+            return Ok(None);
+        }
+
+        #[cfg(not(feature = "legacy-kernel"))]
+        {
+            let appender = tracing_appender::rolling::never(parent, filename);
+            let (writer, guard) = tracing_appender::non_blocking(appender);
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_target(false)
+                .with_ansi(false)
+                .with_writer(writer)
+                .try_init()
+                .map_err(|error| anyhow!("инициализировать файловый журнал: {error}"))?;
+            Ok(Some(guard))
+        }
     } else {
         tracing_subscriber::fmt()
             .with_env_filter(filter)
