@@ -720,14 +720,29 @@ fn legacy_copy(
                 }
                 continue;
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => {
+                stop.store(true, Ordering::Release);
+                return Err(error.into());
+            }
         };
         if count == 0 {
             stop.store(true, Ordering::Release);
             let _ = writer.shutdown(std::net::Shutdown::Write);
             return Ok(total);
         }
-        writer.write_all(&buffer[..count])?;
+        if stop.load(Ordering::Acquire)
+            && stop_deadline
+                .get_or_insert(std::time::Instant::now())
+                .elapsed()
+                >= eof_grace
+        {
+            let _ = writer.shutdown(std::net::Shutdown::Write);
+            return Ok(total);
+        }
+        if let Err(error) = writer.write_all(&buffer[..count]) {
+            stop.store(true, Ordering::Release);
+            return Err(error.into());
+        }
         total += count as u64;
         if verbose {
             info!(direction, bytes = count, payload = %String::from_utf8_lossy(&buffer[..count]), "данные relay");
@@ -837,14 +852,22 @@ async fn handle_connection(
     ));
     tokio::select! {
         result = &mut client_to_upstream => {
+            info!(relay = %relay.name, peer = %peer, direction = "клиент -> upstream", "направление завершилось; ожидается ответная сторона в пределах EOF grace");
             if timeout(Duration::from_secs(relay.eof_grace_seconds), &mut upstream_to_client).await.is_err() {
+                warn!(relay = %relay.name, peer = %peer, grace_seconds = relay.eof_grace_seconds, "EOF grace истёк; закрываем upstream и клиентскую стороны");
                 upstream_to_client.abort();
+                // Дождаться отмены важно: пока задача не уничтожена, принадлежащая
+                // ей половина TcpStream удерживает исходящее TCP-соединение.
+                let _ = upstream_to_client.await;
             }
             result.context("задача клиент -> upstream")?.context("копирование клиент -> upstream")?;
         }
         result = &mut upstream_to_client => {
+            info!(relay = %relay.name, peer = %peer, direction = "upstream -> клиент", "направление завершилось; ожидается клиентская сторона в пределах EOF grace");
             if timeout(Duration::from_secs(relay.eof_grace_seconds), &mut client_to_upstream).await.is_err() {
+                warn!(relay = %relay.name, peer = %peer, grace_seconds = relay.eof_grace_seconds, "EOF grace истёк; закрываем клиентскую и upstream стороны");
                 client_to_upstream.abort();
+                let _ = client_to_upstream.await;
             }
             result.context("задача upstream -> клиент")?.context("копирование upstream -> клиент")?;
         }
@@ -944,6 +967,7 @@ where
 mod tests {
     use super::*;
     use std::net::IpAddr;
+    use tokio::net::TcpListener;
 
     #[test]
     fn validates_profile_and_acl() {
@@ -976,5 +1000,54 @@ mod tests {
         "#;
         let config: Config = toml::from_str(raw).unwrap();
         assert!(config.relay[0].validate().is_err());
+    }
+
+    #[tokio::test]
+    async fn client_eof_closes_upstream_after_configured_grace() {
+        let upstream_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let upstream_addr = upstream_listener.local_addr().unwrap();
+        let client_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client_addr = client_listener.local_addr().unwrap();
+        let client_app = TcpStream::connect(client_addr).await.unwrap();
+        let (client_relay, _) = client_listener.accept().await.unwrap();
+
+        let raw = format!(
+            r#"
+                [[relay]]
+                name = "eof-test"
+                listen = "127.0.0.1:0"
+                upstream = "{upstream_addr}"
+                eof_grace_seconds = 1
+                client_keepalive = {{ enabled = false }}
+                upstream_keepalive = {{ enabled = false }}
+            "#
+        );
+        let relay = toml::from_str::<Config>(&raw).unwrap().relay.remove(0);
+        let task = tokio::spawn(handle_connection(
+            relay,
+            client_relay,
+            "127.0.0.1:12345".parse().unwrap(),
+        ));
+        let (mut upstream_peer, _) = timeout(Duration::from_secs(2), upstream_listener.accept())
+            .await
+            .expect("relay did not connect to upstream")
+            .unwrap();
+
+        // The client sends FIN. The relay half-closes upstream immediately,
+        // then should release the still-open upstream read half after grace.
+        drop(client_app);
+        let mut byte = [0_u8; 1];
+        timeout(
+            Duration::from_secs(2),
+            tokio::io::AsyncReadExt::read(&mut upstream_peer, &mut byte),
+        )
+        .await
+        .expect("upstream did not receive client EOF")
+        .unwrap();
+        timeout(Duration::from_secs(2), task)
+            .await
+            .expect("relay remained alive beyond EOF grace")
+            .unwrap()
+            .unwrap();
     }
 }
