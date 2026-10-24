@@ -81,6 +81,14 @@ Compatibility with a particular CryptoPro/other remote endpoint must be checked
 against its actual versions, cipher suites, certificate profile and key storage.
 This implementation is not a certified SKZI and does not embed CryptoPro CSP.
 
+## Built-in key and certificate generation (v0.1.13)
+
+TLS binaries include offline `pki keygen`, `pki csr` and `pki self-signed` commands.
+RSA-3072 and ECDSA P-256 are available with `tls`; `tls-gost` also includes
+GOST-2012 256/512-bit key generation and signatures. No external openssl CLI
+is invoked. See [PKI_RU.md](PKI_RU.md) for commands, SANs, file permissions,
+trust setup and the boundary between key generation and TLS interoperability.
+
 ## Keys, privileges and logs
 
 Certificates, CA bundles and keys are deployment data, not embedded in binaries.

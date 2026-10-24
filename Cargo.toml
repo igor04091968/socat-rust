@@ -1,6 +1,6 @@
 [package]
 name = "socat-rust"
-version = "0.1.12"
+version = "0.1.13"
 edition = "2024"
 description = "Stable Linux TCP relay for Debian/systemd"
 license = "MIT"
@@ -8,10 +8,11 @@ license = "MIT"
 [features]
 default = []
 legacy-kernel = []
-tls = ["dep:openssl", "dep:tokio-openssl"]
+tls = ["dep:openssl", "dep:tokio-openssl", "dep:foreign-types"]
 tls-gost = ["tls"]
 
 [dependencies]
+foreign-types = { version = "0.3", optional = true }
 openssl = { version = "0.10.81", optional = true }
 tokio-openssl = { version = "0.6.5", optional = true }
 anyhow = "1.0"

@@ -8,6 +8,8 @@ Optional TLS 1.2/1.3, mutual TLS, and explicit GOST TLS 1.2 endpoints are descri
 
 Инструкция на русском: **[запуск TCP, TLS, ГОСТ, daemon и systemd](docs/RUNNING_RU.md)**.
 
+Встроенный генератор в v0.1.13: **[ключи, CSR и самоподписанные сертификаты TLS/ГОСТ](docs/PKI_RU.md)**.
+
 ## Initial supported profile
 
 - IPv4 TCP listener and IPv4 TCP upstream;

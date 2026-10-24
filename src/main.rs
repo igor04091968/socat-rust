@@ -1,5 +1,6 @@
 #![cfg_attr(feature = "legacy-kernel", allow(dead_code, unused_imports))]
 
+mod pki;
 mod transport;
 
 use std::{
@@ -135,6 +136,11 @@ fn daemonize(relay: &RelayConfig, enabled: bool) -> Result<Option<()>> {
 enum Command {
     /// Проверить все профили relay без открытия сетевых сокетов.
     ConfigCheck,
+    /// Генерация PEM-ключей, CSR и самоподписанных сертификатов без запуска relay.
+    Pki {
+        #[command(subcommand)]
+        command: pki::Command,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -472,24 +478,31 @@ fn init_logging(
 }
 
 fn main() {
-    #[cfg(feature = "legacy-kernel")]
-    {
-        if let Err(error) = legacy_main() {
-            eprintln!("Ошибка: {error:#}");
-            std::process::exit(1);
-        }
-    }
-
-    #[cfg(not(feature = "legacy-kernel"))]
-    if let Err(error) = async_main() {
+    if let Err(error) = entrypoint(Cli::parse()) {
         eprintln!("Ошибка: {error:#}");
         std::process::exit(1);
     }
 }
 
+fn entrypoint(cli: Cli) -> Result<()> {
+    if let Some(Command::Pki { command }) = &cli.command {
+        if cli.daemon || cli.relay.is_some() {
+            bail!("pki cannot be combined with --daemon or --relay");
+        }
+        return pki::run(command);
+    }
+    #[cfg(feature = "legacy-kernel")]
+    {
+        legacy_main(cli)
+    }
+    #[cfg(not(feature = "legacy-kernel"))]
+    {
+        async_main(cli)
+    }
+}
+
 #[cfg(not(feature = "legacy-kernel"))]
-fn async_main() -> Result<()> {
-    let cli = Cli::parse();
+fn async_main(cli: Cli) -> Result<()> {
     let config = load_config(&cli.config)?;
     if matches!(cli.command, Some(Command::ConfigCheck)) {
         for relay in &config.relay {
@@ -527,8 +540,7 @@ fn async_main() -> Result<()> {
 }
 
 #[cfg(feature = "legacy-kernel")]
-fn legacy_main() -> Result<()> {
-    let cli = Cli::parse();
+fn legacy_main(cli: Cli) -> Result<()> {
     let config = load_config(&cli.config)?;
     if matches!(cli.command, Some(Command::ConfigCheck)) {
         for relay in &config.relay {

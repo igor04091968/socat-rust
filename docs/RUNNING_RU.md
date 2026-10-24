@@ -1,11 +1,13 @@
 # Запуск socat-rust: TCP, TLS и ГОСТ
 
-Инструкция для Linux x86_64, выпуск v0.1.12. Один процесс обслуживает один
+Инструкция для Linux x86_64, выпуск v0.1.13. Один процесс обслуживает один
 профиль `[[relay]]`. Примеры используют тестовые адреса; замените их своими.
+
+С v0.1.13 в TLS-бинарниках также есть [встроенный генератор ключей, CSR и сертификатов](PKI_RU.md).
 
 ## Выбор бинарника и режима
 
-| Бинарник из v0.1.12 | TCP | TLS 1.2/1.3 | ГОСТ TLS 1.2 |
+| Бинарник из v0.1.13 | TCP | TLS 1.2/1.3 | ГОСТ TLS 1.2 |
 |---|---|---|---|
 | `socat-rust-linux-amd64-static` | Да | Нет | Нет |
 | `socat-rust-linux-amd64-tls-static` | Да | Да | Нет |
@@ -20,7 +22,7 @@
 | Таблица с `mode = "tls"` | Обычный TLS, согласование 1.2 или 1.3 |
 | Таблица с `mode = "gost"` | ГОСТ TLS, только 1.2 |
 
-Параметра выбора версии обычного TLS в v0.1.12 **нет**: нельзя конфигом
+Параметра выбора версии обычного TLS в v0.1.13 **нет**: нельзя конфигом
 принудительно разрешить только 1.2 или только 1.3. Для отключения TLS удалите
 соответствующую таблицу целиком; `mode = "tcp"` и `enabled = false` не поддерживаются.
 Изменения читаются при запуске: перезапустите профиль после изменения конфига
@@ -34,13 +36,13 @@ TCP-режим также может прозрачно передавать TLS
 В новом рабочем каталоге скачайте архив и контрольные суммы:
 
 ```bash
-release_url=https://github.com/igor04091968/socat-rust/releases/download/v0.1.12
+release_url=https://github.com/igor04091968/socat-rust/releases/download/v0.1.13
 curl -fL "$release_url/SHA256SUMS" -o SHA256SUMS
-curl -fL "$release_url/socat-rust-0.1.12-linux-amd64-tls-gost.tar.gz" \
-  -o socat-rust-0.1.12-linux-amd64-tls-gost.tar.gz
+curl -fL "$release_url/socat-rust-0.1.13-linux-amd64-tls-gost.tar.gz" \
+  -o socat-rust-0.1.13-linux-amd64-tls-gost.tar.gz
 sha256sum --ignore-missing -c SHA256SUMS
-tar -xzf socat-rust-0.1.12-linux-amd64-tls-gost.tar.gz
-cd socat-rust-0.1.12-linux-amd64-tls-gost
+tar -xzf socat-rust-0.1.13-linux-amd64-tls-gost.tar.gz
+cd socat-rust-0.1.13-linux-amd64-tls-gost
 sha256sum -c SHA256SUMS
 sudo install -m 0755 socat-rust-linux-amd64-tls-gost-static /usr/local/sbin/socat-rust
 sudo install -d -m 0755 /etc/socat-rust /var/log/socat-rust
@@ -219,7 +221,7 @@ sudo ss -ltnp 'sport = :18000'
 
 ```bash
 tar -xzf source.tar.gz
-cd socat-rust-0.1.12
+cd socat-rust-0.1.13
 sudo install -m 0644 systemd/socat-rust@.service /etc/systemd/system/
 sudo install -d -m 0755 /usr/local/share/doc/socat-connectors
 sudo install -m 0644 docs/ASTRA_CONNECTORS.md /usr/local/share/doc/socat-connectors/README.md
