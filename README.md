@@ -1,115 +1,311 @@
 # socat-rust
 
-Linux/Debian-first TCP relay for replacing the current `socat` forwarding
-profiles with explicit configuration, bounded concurrency and systemd
-isolation.
+TCP-ретранслятор на Rust для переноса существующих соединений между оборудованием
+и сервером. Позволяет заменить используемые TCP-профили `socat`, сохранить
+протокол приложения и при необходимости защитить отдельный участок обычным
+TLS или ГОСТ TLS. Режим выбирается конфигурацией для каждого профиля.
 
-Optional TLS 1.2/1.3, mutual TLS, and explicit GOST TLS 1.2 endpoints are described in [docs/TLS_GOST.md](docs/TLS_GOST.md). TLS is disabled unless an endpoint table is configured and the binary includes the corresponding build feature.
+Проект рассчитан на инфраструктуру, где рядом работают старые устройства,
+унаследованные серверы и современные ОС. Основная проверенная платформа —
+Linux x86_64; для старых ядер есть отдельный TCP-вариант, для FreeBSD выполнена
+предварительная сборка. Расширение проверенной совместимости с российскими
+дистрибутивами Linux и FreeBSD — одно из направлений развития.
 
-Инструкция на русском: **[запуск TCP, TLS, ГОСТ, daemon и systemd](docs/RUNNING_RU.md)**.
+[Скачать v0.1.13](https://github.com/igor04091968/socat-rust/releases/tag/v0.1.13)
+· [Установка и запуск](docs/RUNNING_RU.md)
+· [TLS и ГОСТ](docs/TLS_GOST.md)
+· [Генерация ключей и сертификатов](docs/PKI_RU.md)
 
-Встроенный генератор в v0.1.13: **[ключи, CSR и самоподписанные сертификаты TLS/ГОСТ](docs/PKI_RU.md)**.
+## Для чего использовать
 
-## Initial supported profile
+При замене ОС шлюза необязательно одновременно менять банкоматы, терминалы,
+прикладной протокол и сервер обработки. Можно перенести точку подключения
+на новый узел, оставить клиенту привычный TCP и отдельно настроить соединение
+до сервера. Схема применима при поэтапной модернизации банковской,
+промышленной и корпоративной инфраструктуры, если приложение работает поверх TCP.
+Совместимость конкретного протокола проверяется на его реальном обмене.
 
-- IPv4 TCP listener and IPv4 TCP upstream;
-- bind to an explicit local address;
-- source ACL in CIDR notation;
-- per-profile `backlog` and `max_connections`;
-- separate client/upstream TCP keepalive settings;
-- EOF grace timeout (`-t` equivalent);
-- upstream connect retry with bounded exponential backoff (`forever`);
-- optional payload logging (`-v`, disabled by default);
-- separate process and UID per relay profile through systemd.
-- корректное завершение по SIGTERM/Ctrl-C с прекращением приема новых соединений.
-
-Each relay runs as a separate process. The shipped systemd template starts
-it as root; the daemon prepares logs and locks, then drops to the configured
-numeric UID/GID before opening sockets. Supplementary groups are cleared.
-
-`config.example.toml` contains the observed `bnk2450001`–`bnk2450037` profiles
-(with missing ports omitted). Add a `[[relay]]` block and start its instance
-as `socat-rust@<name>.service`; the Rust binary does not need changing.
-
-## Validate and run
-
-```bash
-cargo test
-cargo run -- --config config.example.toml config-check
-cargo run -- --config config.example.toml --relay bnk2450034
-```
-
-## Build profiles
-
-The project contains two RustRover run configurations and matching Cargo
-aliases:
-
-```bash
-# New Debian/Linux: Tokio implementation
-cargo build-debian
-# target/release/socat-rust
-
-# CentOS 5 / kernel 2.6.18: legacy blocking implementation, static musl
-cargo build-centos5
-# target/x86_64-unknown-linux-musl/release/socat-rust
-```
-
-In RustRover select `build_debian` or `build_centos5` in the Run
-configuration list. Both profiles use the same source and configuration
-format; only the runtime/build target differs.
-
-## Install and operate
-
-Use the static release binaries and the shipped `socat-rust@.service` template.
-See [the running guide](docs/RUNNING_RU.md) for checksum verification, complete
-configuration examples, UID/key permissions, foreground/daemon operation,
-systemd installation and the connector manager.
-
-The all-feature `socat-rust-linux-amd64-tls-gost-static` binary supports plain
-TCP, ordinary TLS and GOST through per-endpoint configuration. Ordinary TLS
-negotiates 1.2/1.3; forcing a specific version through configuration is not
-implemented. GOST is TLS 1.2 only. Restart the profile after changing its config.
-
-CentOS 5/kernel 2.6.18 requires the separate TCP-only `legacy-kernel` variant;
-use the legacy artifact from [v0.1.11](https://github.com/igor04091968/socat-rust/releases/tag/v0.1.11).
-
-## Mapping of the current profile
-
-The command:
+Например, старое устройство продолжает отправлять обычный TCP, а новый шлюз
+защищает участок между площадками:
 
 ```text
-socat ... TCP4-LISTEN:8034,bind=10.34.0.1,su=2450034,fork,max-children=1,backlog=1,range=10.19.63.0/24,reuseaddr,keepalive,keepidle=15,keepintvl=15,keepcnt=8,forever TCP4:172.22.22.34:8000,keepalive,keepidle=150,keepintvl=60,keepcnt=2,forever
+Банкомат / терминал ── TCP ──► socat-rust ── ГОСТ TLS 1.2 ──► сервер
 ```
 
-maps to the `bnk2450034` example profile. `-lf` becomes `log_file`, `-v` is
-`verbose_payload_logging`, and `su=2450034` becomes `uid = 2450034`.
+Сервер должен принимать соответствующий TLS. Если он тоже работает только
+по TCP, на его стороне ставится второй ретранслятор:
 
-The daemon also applies `uid` itself before creating the listener and the
-upstream socket. This is required on systems where firewall rules match the
-process UID. If the daemon is started by hand, start it as root so it can drop
-privileges, for example:
+```text
+Устройство ── TCP ──► relay A ══ TLS / ГОСТ TLS ══► relay B ── TCP ──► сервер
+```
+
+Шифруется участок между relay A и relay B. Локальные TCP-участки остаются
+без шифрования. Получаемый приложением поток байтов сохраняется. Сервер видит новое
+TCP-соединение со стороны последнего ретранслятора; исходный адрес клиента
+автоматически не переносится. Поддержки PROXY protocol сейчас нет.
+
+Для переноса без изменения защиты остаётся обычный режим:
+
+```text
+Устройство ── TCP ──► socat-rust ── TCP ──► сервер
+```
+
+Ретранслятор не разбирает прикладные сообщения, не выполняет STARTTLS и
+не превращает FTP, SSH, HTTP или банковский протокол в другой протокол.
+Он может прозрачно передавать уже зашифрованное приложением TCP-соединение.
+Для протоколов с отдельными каналами данных или встроенными адресами одной
+TCP-переадресации может быть недостаточно.
+
+## Режимы и готовые бинарники
+
+Входящая и исходящая стороны настраиваются независимо. Можно принимать TCP
+и устанавливать TLS до сервера, принимать TLS и отдавать TCP локальному
+приложению либо использовать отдельные TLS-сессии на обеих сторонах.
+
+| Бинарник Linux x86_64 из v0.1.13 | TCP | Обычный TLS 1.2/1.3 | ГОСТ TLS 1.2 | Генератор PKI |
+|---|---|---|---|---|
+| `socat-rust-linux-amd64-static` | Да | Нет | Нет | Нет |
+| `socat-rust-linux-amd64-tls-static` | Да | Да | Нет | RSA, ECDSA |
+| `socat-rust-linux-amd64-tls-gost-static` | Да | Да | Да | RSA, ECDSA, ГОСТ-2012 |
+
+Все три опубликованных бинарника статические. В TLS/ГОСТ-вариантах
+криптобиблиотеки встроены; отдельные `libssl.so`, `libcrypto.so`, `gost.so`
+и программа `openssl` во время работы не требуются. Конфигурация, доверенные
+CA, сертификаты и закрытые ключи хранятся отдельно.
+
+Отсутствие таблиц `[relay.inbound_tls]` и `[relay.outbound_tls]` означает TCP
+без завершения TLS на ретрансляторе. Для включения TLS добавляется нужная
+таблица; менять all-feature бинарник при переключении режимов не требуется.
+
+Обычный TLS автоматически согласует 1.2 или 1.3. В ГОСТ-режиме реализован
+только TLS 1.2; ГОСТ TLS 1.3 и выбор конкретной версии обычного TLS через
+конфигурацию пока отсутствуют. В ГОСТ-режиме предлагается только выбранный
+`gost_cipher`: `kuznyechik`, `magma`, `gost28147` или `legacy28147`.
+Перехода на обычный TLS или открытый TCP при ошибке ГОСТ нет.
+
+## Российские ОС и совместимость платформ
+
+Практическая цель — иметь проверяемый путь установки на используемых в РФ
+Linux-дистрибутивах и FreeBSD. Совместимость фиксируется для сочетания
+ОС, версии ядра, архитектуры процессора, варианта бинарника и режима работы.
+Единый конфиг упрощает перенос, но проверка на одной ОС не подтверждает все остальные.
+
+| Платформа | Что есть сейчас | Граница проверки / следующий шаг |
+|---|---|---|
+| Astra Linux 1.8.6, x86_64 | Подтверждены запуск TCP-профилей, отдельные UID, systemd, управление процессами | TLS/ГОСТ проверены на Linux-стенде; конкретные серверы и политики Astra требуют приёмки |
+| Современный Linux x86_64 | Статические musl-сборки TCP/TLS/ГОСТ/PKI; функциональные тесты на Linux | Проверять конкретные версии ОС, ядра и средства защиты |
+| Альт, РЕД ОС, РОСА, x86_64 | Целевые системы для расширения матрицы Linux | Отдельные результаты испытаний проекта пока не опубликованы |
+| CentOS 5, ядро 2.6.18, x86_64 | Отдельный блокирующий TCP-runtime `legacy-kernel`; готовый бинарник v0.1.11 | TLS/ГОСТ и PKI в legacy не поддерживаются; текущий v0.1.13 не объявляется проверенным на старом ядре |
+| FreeBSD 14.4, amd64 | Предварительно собран статический TCP-бинарник v0.1.11, проверены ELF и линковка | Запуск на FreeBSD ещё не принят; TLS/ГОСТ/PKI и служба rc.d не подтверждены; в релиз v0.1.13 эта сборка не входит |
+| AArch64 и другие архитектуры | Направление дальнейшего переноса | Готовые проверенные бинарники проекта пока не опубликованы |
+
+Российские ОС выпускаются для разных архитектур: это видно, например,
+в [описании Альт Сервер](https://www.basealt.ru/alt-server0/description)
+и [вариантах загрузки РЕД ОС](https://redos.red-soft.ru/product/downloads/).
+Наличие нужной архитектуры в ОС не означает наличие соответствующей сборки
+socat-rust. Для Эльбрус и других платформ нужна отдельная оценка инструментария,
+сборка и испытания.
+
+Статическая musl-сборка уменьшает зависимость Linux-бинарника от версии
+системной glibc. Она сохраняет требования к ядру, CPU, доступным системным
+вызовам и политикам безопасности. Linux-бинарник не является бинарником FreeBSD:
+для FreeBSD нужен отдельный target и совместимый системный интерфейс.
+Сведения о выпусках самой ОС доступны у [проекта FreeBSD](https://www.freebsd.org/releases/).
+
+На защищённых редакциях ОС отдельно проверяются права на ключи, назначение UID,
+мандатные политики, SELinux/AppArmor там, где они используются, сетевые правила
+и запуск под штатной системой управления службами. Отсутствие динамических
+библиотек не отменяет эти проверки. Пакеты DEB/RPM и интеграция с rc.d остаются
+задачами развития; текущая установка Linux выполняется из архива релиза.
+
+## Надёжность и работа под нагрузкой
+
+Современный runtime использует асинхронный ввод-вывод Tokio. Один профиль
+обслуживается отдельным процессом; внутри процесса соединения выполняются
+асинхронными задачами. Для каждого профиля задаются лимит активных соединений,
+очередь прослушивания, ACL и параметры TCP keepalive. Ошибка одного процесса
+не завершает остальные профили, хотя ресурсы узла у них общие.
+
+В реализации уже предусмотрены:
+
+- `max_connections` для ограничения одновременно обслуживаемых соединений;
+- `backlog` для очереди ожидающих соединений на стороне ОС;
+- повторные TCP-подключения к upstream с таймаутом одной попытки и задержкой
+  между попытками от 1 до 30 секунд;
+- отдельный таймаут TLS-рукопожатия и отказ при ошибке проверки сертификата;
+- `eof_grace_seconds` для завершения встречного направления после EOF;
+- kernel lock, защищающий профиль от запуска второго экземпляра с тем же lock-файлом;
+- запуск под отдельным UID/GID, SIGTERM/Ctrl-C и перезапуск процесса средствами systemd.
+
+Лимит соединений защищает от неограниченного роста обслуживаемых сессий,
+но не гарантирует приём любого числа клиентов. В современном runtime при
+заполнении лимита приём новых сессий приостанавливается; очередь ядра тоже
+ограничена. При недоступном upstream попытки TCP-подключения продолжаются
+без общего предела времени и удерживают слот. Это нужно учитывать при выборе
+лимитов и таймаутов самого клиента. Ошибки TLS завершают соединение без downgrade.
+
+Ретранслятор не хранит сообщения на диске, не восстанавливает оборванную
+прикладную сессию и не повторяет транзакции. Доставку и повтор операции после
+обрыва определяет протокол клиента и сервера. Перезапуск профиля разрывает
+его текущие соединения; загрузки нового конфига без перезапуска и переноса
+живых сессий между узлами пока нет.
+
+**Подтверждённых показателей максимальной нагрузки пока нет.** Функциональные
+тесты и работа нескольких десятков профилей не заменяют измерения пропускной
+способности, задержек и многосуточной устойчивости. Указывать гарантированные
+Гбит/с или число одновременных сессий без такого стенда было бы неверно.
+
+Для высоконагруженного внедрения нужны испытания на целевом оборудовании:
+длительные соединения и частые переподключения, медленные получатели,
+заполнение очередей, потеря upstream, неуспешные TLS-рукопожатия и восстановление
+после отказа. Измеряются CPU, RSS, файловые дескрипторы, задержки p95/p99,
+скорость передачи и ошибки отдельно для TCP, обычного TLS и каждого ГОСТ-набора.
+
+В поставляемом systemd-шаблоне `LimitNOFILE=4096`. Одной обслуживаемой сессии
+обычно нужны два сетевых сокета, плюс служебные дескрипторы процесса. Увеличение
+`max_connections` должно сопровождаться проверкой лимитов ОС и памяти.
+Большое количество отдельных профилей также увеличивает число процессов
+и runtime-потоков. Payload-логирование выключайте; для TLS оно запрещено.
+Для обычных журналов настройте ротацию отдельно.
+
+## Быстрый пример: один TCP-профиль
+
+После [установки подходящего статического бинарника](docs/RUNNING_RU.md)
+создайте `/etc/socat-rust/relays.toml`:
+
+```toml
+[[relay]]
+name = "demo"
+listen = "127.0.0.1:18000"
+upstream = "127.0.0.1:18080"
+allow = ["127.0.0.1/32"]
+uid = 2450100
+max_connections = 1
+backlog = 16
+connect_timeout_seconds = 10
+eof_grace_seconds = 1
+pid_file = "/run/socat-rust/demo.lock"
+log_file = "/var/log/socat-rust/demo.log"
+verbose_payload_logging = false
+```
+
+Адреса локальные, UID приведён для примера. Процесс, стартовавший от root,
+подготавливает лог и lock, затем устанавливает UID и GID, равные `uid`,
+и очищает дополнительные группы. Без поля `uid` сохраняется пользователь запуска.
+Привязка к UID полезна, когда сетевые правила различают соединения разных устройств.
 
 ```bash
-sudo ./socat-rust-centos5-v0.1.11 \
-  --config /etc/socat-rust/relays.toml --relay bnk2450034
+sudo install -d -m 0755 /etc/socat-rust /var/log/socat-rust
+sudo /usr/local/sbin/socat-rust --config /etc/socat-rust/relays.toml config-check
+sudo /usr/local/sbin/socat-rust --config /etc/socat-rust/relays.toml --relay demo
 ```
 
-The process then runs with effective UID/GID `2450034`. Root prepares the log
-file before dropping privileges; TLS material must be readable by the relay UID. Starting as the wrong
-non-root account is rejected instead of silently creating firewall traffic
-under the wrong UID.
+`config-check` проверяет весь файл и TLS-материалы, но не устанавливает
+соединение с upstream. В рабочем режиме один процесс выбирает один профиль
+через `--relay`. `listen` и `upstream` задаются числовыми IPv4-адресами с портом.
+`server_name` в TLS-конфиге используется для проверки сертификата и не заменяет DNS.
 
-Для совместимости с существующим Monit можно задать `pid_file`, например
-`pid_file = "/tmp/bnk2450014.lock"`. Файл содержит PID и одновременно
-удерживается через kernel lock. Старый PID после падения не препятствует
-повторному запуску: блокировка освобождается ядром автоматически.
+Для добавления ГОСТ TLS только на исходящей стороне добавьте к этому профилю:
 
-Проверку Monit `if children > 1` для `socat-rust` переносить не следует:
-relay использует потоки, а не дочерние процессы. Ограничение соединений
-задаётся параметром `max_connections`.
+```toml
+[relay.outbound_tls]
+mode = "gost"
+gost_cipher = "kuznyechik"
+ca_file = "/etc/socat-rust/pki/demo/upstream-ca.pem"
+server_name = "processing.example.org"
+handshake_timeout_seconds = 10
+```
 
-## Safety notes
+Предварительно установите CA-файл и замените `upstream` на адрес и порт сервера,
+принимающего ГОСТ TLS 1.2. Пример имени сервера заменяется именем из его сертификата.
+Для mTLS дополнительно задаются `certificate` и `private_key`. Входящая сторона
+при этом остаётся TCP. Подробные примеры обеих сторон — в [инструкции запуска](docs/RUNNING_RU.md).
 
-Payload logging can expose credentials and personal data and can grow logs
-quickly. Keep it disabled in production unless it is temporarily required for
-diagnosis, with logrotate configured separately.
+Для Linux/systemd используется шаблон `socat-rust@.service`, без `--daemon`.
+Для ручного фонового запуска есть `--daemon`. При переносе со старого `socat`
+сначала освобождается прежний адрес/порт, затем запускается новый профиль.
+Изменения конфигурации и сертификатов вступают в силу после его перезапуска.
+[Менеджер банковских коннекторов](docs/ASTRA_CONNECTORS.md) — отдельный Python 3.11+
+инструмент для профилей `bnk2450001`–`bnk2450037`, а не зависимость самого Rust-бинарника.
+
+## Ключи, сертификаты и ГОСТ
+
+В TLS-бинарниках v0.1.13 доступны `pki keygen`, `pki csr` и `pki self-signed`.
+Обычные алгоритмы — RSA-3072 и ECDSA P-256; в `tls-gost` добавлены ГОСТ-2012
+256/512 бит. Генератор создаёт PEM-файлы с закрытыми правами и отказывается
+перезаписывать существующие файлы. Для удостоверяющего центра передаётся CSR,
+закрытый ключ остаётся у владельца. [Команды и назначение полей](docs/PKI_RU.md).
+
+Самоподписанный сертификат не получает доверие автоматически. ГОСТ-512
+в генераторе означает возможность создать ключ и подпись; TLS-совместимость
+512-битного сертификата не заявлена. ГОСТ TLS проверен с 256-битными ключами.
+CryptoPro CSP, аппаратные токены, зашифрованные контейнеры и CRL/OCSP не встроены;
+совместимость с конкретным внешним криптопровайдером требует отдельной проверки.
+
+Реализация ГОСТ в проекте **не является сертифицированным СКЗИ**. Встраивание
+ГОСТ-алгоритмов и запуск на российской ОС сами по себе не подтверждают
+пригодность решения для конкретной регулируемой системы. Согласованный
+криптографический профиль и требования к внедрению определяются отдельно.
+
+## Что проверено в v0.1.13
+
+Выпуск содержит исходники, manifest сборки, SHA256SUMS, лицензии зависимостей
+и результаты проверок. Для трёх Linux-бинарников подтверждено отсутствие
+ELF interpreter и зависимостей `NEEDED`.
+
+В проверках выпуска: 25 сценариев PKI, 34 TLS/ГОСТ, 14 обычного TLS,
+unit-тесты TCP/TLS/ГОСТ/legacy и проверка 35 конфигурационных профилей каждым
+из трёх бинарников. Проверялись взаимная аутентификация, неверные имена и CA,
+просроченные сертификаты, отсутствие downgrade и работа всех четырёх ГОСТ-наборов.
+Обычный TLS также проверен независимым Python TLS-клиентом.
+
+Эти результаты относятся к указанным сценариям и сборкам. Они не заменяют
+испытания на всех дистрибутивах, нагрузочный стенд или проверку реального
+процессинга, CryptoPro и отказоустойчивой пары узлов.
+
+## Развитие
+
+Ближайшая задача — превратить переносимость в воспроизводимую матрицу испытаний.
+Для каждой платформы должны быть указаны версия ОС/ядра, архитектура, checksum
+бинарника и результаты запуска, обмена, UID/прав, TLS и отказов.
+
+1. **Российские Linux-дистрибутивы.** Стенды Astra, Альт, РЕД ОС и РОСА;
+   проверки штатных политик защиты и управления службами, затем DEB/RPM-пакеты.
+   Другие дистрибутивы добавляются тем же набором приёмочных сценариев.
+2. **FreeBSD.** Runtime-испытания TCP, служба rc.d, права/keepalive/остановка;
+   затем отдельная статическая сборка и проверка TLS/ГОСТ/PKI. Требуется
+   согласованный минимальный выпуск FreeBSD, а не только успешная кросс-компиляция.
+3. **Нагрузка и наблюдаемость.** Воспроизводимые benchmark/soak-прогоны,
+   тесты перегрузки и сетевых отказов, метрики сессий/ошибок/задержек,
+   контроль удержания слотов при долгой недоступности upstream.
+4. **Криптографическая совместимость.** Матрица внешних ГОСТ-endpoint,
+   управление допустимыми версиями TLS, отдельное исследование ГОСТ TLS 1.3
+   с подходящим backend и испытаниями совместимости. Сейчас эти возможности
+   сверх описанного v0.1.13 не реализованы.
+5. **Другие архитектуры и эксплуатация.** AArch64, затем оценка остальных
+   аппаратных платформ; подписанные артефакты, управляемое обновление ключей
+   и сертификатов, документированные схемы резервирования шлюзов.
+
+## Исходники и сборка
+
+Основной код — Rust; обычный TCP не требует криптографических зависимостей.
+Для современных Linux-релизов используется статический target
+`x86_64-unknown-linux-musl`. Простой `cargo build --release` без выбора target
+не следует считать гарантированно статической сборкой.
+
+```bash
+# Статический TCP для современного Linux; нужен установленный musl target/toolchain.
+cargo build --locked --release --no-default-features --target x86_64-unknown-linux-musl
+
+# Отдельный TCP-runtime для старого ядра; runtime на целевой ОС проверяется отдельно.
+RUSTFLAGS='-C relocation-model=static -C target-feature=+crt-static' \
+  cargo build --locked --release --no-default-features --features legacy-kernel \
+  --target x86_64-unknown-linux-musl
+```
+
+Статическая TLS/ГОСТ-сборка и закреплённые версии native-зависимостей описаны
+в [TLS_GOST.md](docs/TLS_GOST.md). Для каждого выпуска проверяются фактическая
+линковка и внешние зависимости. Обновление встроенного OpenSSL/ГОСТ Engine
+требует пересборки и замены бинарника; обновление системного `libssl` его не обновляет.
+Готовый старый TCP-бинарник для CentOS 5 опубликован отдельно в
+[v0.1.11](https://github.com/igor04091968/socat-rust/releases/tag/v0.1.11).
