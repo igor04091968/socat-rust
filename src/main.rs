@@ -305,7 +305,7 @@ fn load_config(path: &Path) -> Result<Config> {
 ///
 /// Если процесс уже запущен под нужным UID, смена не выполняется. Если он
 /// запущен от root, дополнительно сбрасываются группы, затем устанавливаются
-/// GID и UID профиля. После этого вернуть привилегии невозможно.
+/// GID и UID профиля. После этого вернуть root привилегии невозможно.
 #[cfg(unix)]
 fn apply_configured_uid(relay: &RelayConfig) -> Result<()> {
     let Some(uid) = relay.uid else {
@@ -411,7 +411,7 @@ fn init_logging(
 ) -> Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
     // Если RUST_LOG не задан, оставляем информационный уровень. Payload
     // пишется только при verbose_payload_logging=true, поскольку может
-    // содержать платёжные данные и быстро увеличивать файл журнала.
+    // содержать приватные данные и быстро увеличивать файл журнала.
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     if let Some(path) = &relay.log_file {
@@ -425,7 +425,8 @@ fn init_logging(
             .to_string_lossy()
             .into_owned();
 
-        // Ядро CentOS 5 (2.6.18) не поддерживает FUTEX_WAIT_BITSET и
+        // Старое ядро CentOS 5 (2.6.18-старый прокси-сервер) не поддерживает
+        // FUTEX_WAIT_BITSET и
         // возвращает ENOSYS. Фоновый non-blocking worker tracing-appender
         // на таком ядре начинает busy-loop. Для legacy-сборки используем
         // синхронную запись напрямую в файл и не создаём worker-поток.
