@@ -1,5 +1,6 @@
 #![cfg_attr(feature = "legacy-kernel", allow(dead_code, unused_imports))]
 
+mod advice;
 mod pki;
 mod transport;
 
@@ -153,6 +154,8 @@ struct Config {
 struct RelayConfig {
     name: String,
     #[serde(default)]
+    advice: advice::Config,
+    #[serde(default)]
     inbound_tls: Option<transport::InboundTls>,
     #[serde(default)]
     outbound_tls: Option<transport::OutboundTls>,
@@ -224,6 +227,7 @@ fn default_eof_grace_seconds() -> u64 {
 
 impl RelayConfig {
     fn validate(&self) -> Result<()> {
+        self.advice.validate()?;
         if let Some(tls) = &self.inbound_tls {
             tls.validate()?;
         }
@@ -808,16 +812,36 @@ async fn run_relay(relay: RelayConfig) -> Result<()> {
         max_connections = relay.max_connections, backlog = relay.backlog,
         "relay слушает входящий порт");
 
+    let monitor = Arc::new(advice::Monitor::new(relay.advice.clone()));
+    let mut reporting = tokio::time::interval_at(
+        tokio::time::Instant::now() + Duration::from_secs(relay.advice.period_seconds),
+        Duration::from_secs(relay.advice.period_seconds),
+    );
+    reporting.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let advice_enabled = relay.advice.mode == advice::Mode::Recommend;
+    let configured_timeout = if relay.connect_timeout_seconds == 0 {
+        10
+    } else {
+        relay.connect_timeout_seconds
+    };
     let mut shutdown = Box::pin(shutdown_signal());
     loop {
         if slots.available_permits() == 0 {
             tokio::select! {
                 _ = &mut shutdown => break,
+                _ = reporting.tick(), if advice_enabled => {
+                    monitor.report(&relay.name, configured_timeout);
+                    continue;
+                }
                 _ = sleep(Duration::from_millis(100)) => continue,
             }
         }
         let (client, peer) = tokio::select! {
             _ = &mut shutdown => break,
+            _ = reporting.tick(), if advice_enabled => {
+                monitor.report(&relay.name, configured_timeout);
+                continue;
+            }
             accepted = listener.accept() => accepted.context("принять клиентское соединение")?,
         };
         let peer_ip = peer.ip();
@@ -838,17 +862,20 @@ async fn run_relay(relay: RelayConfig) -> Result<()> {
         let profile = relay.clone();
         #[cfg(feature = "tls")]
         let tls_runtime = tls_runtime.clone();
+        let monitor = monitor.clone();
         tokio::spawn(async move {
             let _permit = permit;
-            if let Err(error) = handle_connection(
+            let result = handle_connection(
                 profile,
                 client,
                 peer,
+                monitor.clone(),
                 #[cfg(feature = "tls")]
                 tls_runtime,
             )
-            .await
-            {
+            .await;
+            monitor.session(result.is_ok());
+            if let Err(error) = result {
                 warn!(peer = %peer, error = %error, "соединение relay завершилось с ошибкой");
             }
         });
@@ -879,6 +906,7 @@ async fn handle_connection(
     relay: RelayConfig,
     client: TcpStream,
     peer: std::net::SocketAddr,
+    monitor: Arc<advice::Monitor>,
     #[cfg(feature = "tls")] tls_runtime: Arc<transport::Runtime>,
 ) -> Result<()> {
     configure_keepalive(&client, &relay.client_keepalive)?;
@@ -886,10 +914,17 @@ async fn handle_connection(
     // Authenticate the incoming TLS client before touching the upstream.
     #[cfg(feature = "tls")]
     let client = tls_runtime.accept(client).await?;
-    let upstream = connect_forever(&relay).await?;
+    let upstream = connect_forever(&relay, &monitor).await?;
     configure_keepalive(&upstream, &relay.upstream_keepalive)?;
     #[cfg(feature = "tls")]
-    let upstream = tls_runtime.connect(upstream).await?;
+    let upstream = {
+        let started = std::time::Instant::now();
+        let result = tls_runtime.connect(upstream).await;
+        if relay.outbound_tls.is_some() {
+            monitor.tls(started.elapsed(), result.is_ok());
+        }
+        result?
+    };
     #[cfg(feature = "tls")]
     let (client_reader, client_writer) = tokio::io::split(client);
     #[cfg(feature = "tls")]
@@ -936,7 +971,7 @@ async fn handle_connection(
     Ok(())
 }
 
-async fn connect_forever(relay: &RelayConfig) -> Result<TcpStream> {
+async fn connect_forever(relay: &RelayConfig, monitor: &advice::Monitor) -> Result<TcpStream> {
     let timeout_seconds = if relay.connect_timeout_seconds == 0 {
         10
     } else {
@@ -944,6 +979,7 @@ async fn connect_forever(relay: &RelayConfig) -> Result<TcpStream> {
     };
     let mut delay = Duration::from_secs(1);
     loop {
+        let started = std::time::Instant::now();
         match timeout(
             Duration::from_secs(timeout_seconds),
             TcpStream::connect(&relay.upstream),
@@ -951,13 +987,16 @@ async fn connect_forever(relay: &RelayConfig) -> Result<TcpStream> {
         .await
         {
             Ok(Ok(stream)) => {
+                monitor.tcp(started.elapsed(), true, false);
                 info!(relay = %relay.name, upstream = %relay.upstream, "upstream подключён");
                 return Ok(stream);
             }
             Ok(Err(error)) => {
+                monitor.tcp(started.elapsed(), false, false);
                 warn!(relay = %relay.name, upstream = %relay.upstream, %error, "ошибка подключения к upstream; повторная попытка")
             }
             Err(_) => {
+                monitor.tcp(started.elapsed(), false, true);
                 warn!(relay = %relay.name, upstream = %relay.upstream, timeout_seconds, "истёк тайм-аут подключения к upstream; повторная попытка")
             }
         }
@@ -1089,6 +1128,7 @@ mod tests {
             relay,
             client_relay,
             "127.0.0.1:12345".parse().unwrap(),
+            Arc::new(advice::Monitor::new(advice::Config::default())),
             #[cfg(feature = "tls")]
             tls_runtime,
         ));
