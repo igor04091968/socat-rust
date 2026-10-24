@@ -228,6 +228,12 @@ fn default_eof_grace_seconds() -> u64 {
 impl RelayConfig {
     fn validate(&self) -> Result<()> {
         self.advice.validate()?;
+        self.advice
+            .validate_initial_timeout(if self.connect_timeout_seconds == 0 {
+                10
+            } else {
+                self.connect_timeout_seconds
+            })?;
         if let Some(tls) = &self.inbound_tls {
             tls.validate()?;
         }
@@ -812,18 +818,21 @@ async fn run_relay(relay: RelayConfig) -> Result<()> {
         max_connections = relay.max_connections, backlog = relay.backlog,
         "relay слушает входящий порт");
 
-    let monitor = Arc::new(advice::Monitor::new(relay.advice.clone()));
-    let mut reporting = tokio::time::interval_at(
-        tokio::time::Instant::now() + Duration::from_secs(relay.advice.period_seconds),
-        Duration::from_secs(relay.advice.period_seconds),
-    );
-    reporting.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let advice_enabled = relay.advice.mode == advice::Mode::Recommend;
     let configured_timeout = if relay.connect_timeout_seconds == 0 {
         10
     } else {
         relay.connect_timeout_seconds
     };
+    let monitor = Arc::new(advice::Monitor::with_timeout(
+        relay.advice.clone(),
+        configured_timeout,
+    ));
+    let mut reporting = tokio::time::interval_at(
+        tokio::time::Instant::now() + Duration::from_secs(relay.advice.period_seconds),
+        Duration::from_secs(relay.advice.period_seconds),
+    );
+    reporting.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let advice_enabled = relay.advice.mode != advice::Mode::Off;
     let mut shutdown = Box::pin(shutdown_signal());
     loop {
         if slots.available_permits() == 0 {
@@ -914,14 +923,14 @@ async fn handle_connection(
     // Authenticate the incoming TLS client before touching the upstream.
     #[cfg(feature = "tls")]
     let client = tls_runtime.accept(client).await?;
-    let upstream = connect_forever(&relay, &monitor).await?;
+    let (upstream, _policy_generation) = connect_forever(&relay, &monitor).await?;
     configure_keepalive(&upstream, &relay.upstream_keepalive)?;
     #[cfg(feature = "tls")]
     let upstream = {
         let started = std::time::Instant::now();
         let result = tls_runtime.connect(upstream).await;
         if relay.outbound_tls.is_some() {
-            monitor.tls(started.elapsed(), result.is_ok());
+            monitor.tls_attempt(started.elapsed(), result.is_ok(), _policy_generation);
         }
         result?
     };
@@ -971,14 +980,13 @@ async fn handle_connection(
     Ok(())
 }
 
-async fn connect_forever(relay: &RelayConfig, monitor: &advice::Monitor) -> Result<TcpStream> {
-    let timeout_seconds = if relay.connect_timeout_seconds == 0 {
-        10
-    } else {
-        relay.connect_timeout_seconds
-    };
+async fn connect_forever(
+    relay: &RelayConfig,
+    monitor: &advice::Monitor,
+) -> Result<(TcpStream, u64)> {
     let mut delay = Duration::from_secs(1);
     loop {
+        let (timeout_seconds, policy_generation) = monitor.timeout_policy();
         let started = std::time::Instant::now();
         match timeout(
             Duration::from_secs(timeout_seconds),
@@ -987,16 +995,16 @@ async fn connect_forever(relay: &RelayConfig, monitor: &advice::Monitor) -> Resu
         .await
         {
             Ok(Ok(stream)) => {
-                monitor.tcp(started.elapsed(), true, false);
-                info!(relay = %relay.name, upstream = %relay.upstream, "upstream подключён");
-                return Ok(stream);
+                monitor.tcp_attempt(started.elapsed(), true, false, policy_generation);
+                info!(relay = %relay.name, upstream = %relay.upstream, tcp_timeout_seconds = timeout_seconds, policy_generation, "upstream подключён");
+                return Ok((stream, policy_generation));
             }
             Ok(Err(error)) => {
-                monitor.tcp(started.elapsed(), false, false);
+                monitor.tcp_attempt(started.elapsed(), false, false, policy_generation);
                 warn!(relay = %relay.name, upstream = %relay.upstream, %error, "ошибка подключения к upstream; повторная попытка")
             }
             Err(_) => {
-                monitor.tcp(started.elapsed(), false, true);
+                monitor.tcp_attempt(started.elapsed(), false, true, policy_generation);
                 warn!(relay = %relay.name, upstream = %relay.upstream, timeout_seconds, "истёк тайм-аут подключения к upstream; повторная попытка")
             }
         }
