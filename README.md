@@ -4,6 +4,8 @@ Linux/Debian-first TCP relay for replacing the current `socat` forwarding
 profiles with explicit configuration, bounded concurrency and systemd
 isolation.
 
+Optional TLS 1.2/1.3, mutual TLS, and explicit GOST TLS 1.2 endpoints are described in [docs/TLS_GOST.md](docs/TLS_GOST.md). TLS is disabled unless an endpoint table is configured and the binary includes the corresponding build feature.
+
 ## Initial supported profile
 
 - IPv4 TCP listener and IPv4 TCP upstream;

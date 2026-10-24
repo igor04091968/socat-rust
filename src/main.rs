@@ -1,5 +1,7 @@
 #![cfg_attr(feature = "legacy-kernel", allow(dead_code, unused_imports))]
 
+mod transport;
+
 use std::{
     fs::{File, OpenOptions},
     io::Write,
@@ -141,8 +143,13 @@ struct Config {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RelayConfig {
     name: String,
+    #[serde(default)]
+    inbound_tls: Option<transport::InboundTls>,
+    #[serde(default)]
+    outbound_tls: Option<transport::OutboundTls>,
     listen: String,
     upstream: String,
     #[serde(default)]
@@ -211,6 +218,17 @@ fn default_eof_grace_seconds() -> u64 {
 
 impl RelayConfig {
     fn validate(&self) -> Result<()> {
+        if let Some(tls) = &self.inbound_tls {
+            tls.validate()?;
+        }
+        if let Some(tls) = &self.outbound_tls {
+            tls.validate()?;
+        }
+        if (self.inbound_tls.is_some() || self.outbound_tls.is_some())
+            && self.verbose_payload_logging
+        {
+            bail!("TLS profiles cannot enable plaintext payload logging");
+        }
         if self.name.trim().is_empty() || self.name.contains('/') || self.name.contains(' ') {
             bail!(
                 "имя relay должно быть непустым и безопасным для пути: {:?}",
@@ -269,6 +287,8 @@ fn load_config(path: &Path) -> Result<Config> {
     let mut names = std::collections::HashSet::new();
     for relay in &config.relay {
         relay.validate()?;
+        #[cfg(feature = "tls")]
+        transport::Runtime::build(relay.inbound_tls.as_ref(), relay.outbound_tls.as_ref())?;
         if !names.insert(relay.name.clone()) {
             bail!("дублирующееся имя relay: {}", relay.name);
         }
@@ -751,6 +771,11 @@ fn legacy_copy(
 }
 
 async fn run_relay(relay: RelayConfig) -> Result<()> {
+    #[cfg(feature = "tls")]
+    let tls_runtime = Arc::new(transport::Runtime::build(
+        relay.inbound_tls.as_ref(),
+        relay.outbound_tls.as_ref(),
+    )?);
     let listen_addr: std::net::SocketAddr =
         relay.listen.parse().context("разобрать адрес listen")?;
     let socket = if listen_addr.ip().is_ipv4() {
@@ -798,9 +823,19 @@ async fn run_relay(relay: RelayConfig) -> Result<()> {
             }
         };
         let profile = relay.clone();
+        #[cfg(feature = "tls")]
+        let tls_runtime = tls_runtime.clone();
         tokio::spawn(async move {
             let _permit = permit;
-            if let Err(error) = handle_connection(profile, client, peer).await {
+            if let Err(error) = handle_connection(
+                profile,
+                client,
+                peer,
+                #[cfg(feature = "tls")]
+                tls_runtime,
+            )
+            .await
+            {
                 warn!(peer = %peer, error = %error, "соединение relay завершилось с ошибкой");
             }
         });
@@ -831,12 +866,24 @@ async fn handle_connection(
     relay: RelayConfig,
     client: TcpStream,
     peer: std::net::SocketAddr,
+    #[cfg(feature = "tls")] tls_runtime: Arc<transport::Runtime>,
 ) -> Result<()> {
     configure_keepalive(&client, &relay.client_keepalive)?;
     info!(relay = %relay.name, peer = %peer, "клиент подключён");
+    // Authenticate the incoming TLS client before touching the upstream.
+    #[cfg(feature = "tls")]
+    let client = tls_runtime.accept(client).await?;
     let upstream = connect_forever(&relay).await?;
     configure_keepalive(&upstream, &relay.upstream_keepalive)?;
+    #[cfg(feature = "tls")]
+    let upstream = tls_runtime.connect(upstream).await?;
+    #[cfg(feature = "tls")]
+    let (client_reader, client_writer) = tokio::io::split(client);
+    #[cfg(feature = "tls")]
+    let (upstream_reader, upstream_writer) = tokio::io::split(upstream);
+    #[cfg(not(feature = "tls"))]
     let (client_reader, client_writer) = client.into_split();
+    #[cfg(not(feature = "tls"))]
     let (upstream_reader, upstream_writer) = upstream.into_split();
     let mut client_to_upstream = tokio::spawn(relay_direction(
         client_reader,
@@ -1023,10 +1070,14 @@ mod tests {
             "#
         );
         let relay = toml::from_str::<Config>(&raw).unwrap().relay.remove(0);
+        #[cfg(feature = "tls")]
+        let tls_runtime = Arc::new(transport::Runtime::build(None, None).unwrap());
         let task = tokio::spawn(handle_connection(
             relay,
             client_relay,
             "127.0.0.1:12345".parse().unwrap(),
+            #[cfg(feature = "tls")]
+            tls_runtime,
         ));
         let (mut upstream_peer, _) = timeout(Duration::from_secs(2), upstream_listener.accept())
             .await

@@ -1,0 +1,28 @@
+# Synthetic documentation addresses. Do not apply to existing production relays.
+[[relay]]
+name = "tls-client-example"
+listen = "127.0.0.1:18000"
+upstream = "192.0.2.10:443"
+allow = ["127.0.0.1/32"]
+max_connections = 4
+
+[relay.outbound_tls]
+mode = "tls"
+ca_file = "/etc/socat-rust/pki/upstream-ca.pem"
+server_name = "upstream.example.internal"
+handshake_timeout_seconds = 10
+
+[[relay]]
+name = "gost-server-example"
+listen = "127.0.0.1:18001"
+upstream = "127.0.0.1:18002"
+allow = ["127.0.0.1/32"]
+max_connections = 4
+
+[relay.inbound_tls]
+mode = "gost"
+gost_cipher = "kuznyechik"
+certificate = "/etc/socat-rust/pki/server-chain.pem"
+private_key = "/etc/socat-rust/pki/server.key"
+client_ca = "/etc/socat-rust/pki/client-ca.pem"
+handshake_timeout_seconds = 10
