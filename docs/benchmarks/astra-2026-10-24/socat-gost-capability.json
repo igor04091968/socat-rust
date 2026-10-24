@@ -1,0 +1,14 @@
+{
+  "command": [
+    "/usr/bin/socat",
+    "-u",
+    "/dev/null",
+    "OPENSSL:127.0.0.1:TEST_PORT,verify=0,ciphers=GOST2012-KUZNYECHIK-KUZNYECHIKOMAC,connect-timeout=1"
+  ],
+  "returncode": 1,
+  "stderr": "2026/10/24 13:12:52 socat[TEST_PID] E SSL_set_cipher_list(, \"GOST2012-KUZNYECHIK-KUZNYECHIKOMAC\"): error:0A0000B9:SSL routines::no cipher match\n",
+  "redacted_fields": [
+    "test PID in stderr",
+    "ephemeral loopback port in command"
+  ]
+}

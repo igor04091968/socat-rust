@@ -1,0 +1,254 @@
+{
+  "medians": {
+    "('tcp', 'direct', 'rtt128')": {
+      "wall_seconds": 0.34720090799964964,
+      "mib_s_one_direction": 0.5273761229627452,
+      "cpu_seconds_relay_family": 0.21,
+      "rtt_median_us": 191.486,
+      "rtt_p95_us": 218.736,
+      "rtt_p99_us": 265.851
+    },
+    "('tcp', 'direct', 'connect128')": {
+      "wall_seconds": 0.12664139800472185,
+      "mib_s_one_direction": 0.14458579235138644,
+      "cpu_seconds_relay_family": 0.08999999999999997,
+      "rtt_median_us": 673.741,
+      "rtt_p95_us": 753.499,
+      "rtt_p99_us": 873.988
+    },
+    "('tcp', 'direct', 'bulk1')": {
+      "wall_seconds": 0.23896566999610513,
+      "mib_s_one_direction": 267.82089662102146,
+      "cpu_seconds_relay_family": 0.15000000000000036
+    },
+    "('tcp', 'direct', 'bulk16')": {
+      "wall_seconds": 0.9157863730215468,
+      "mib_s_one_direction": 139.77058817514026,
+      "cpu_seconds_relay_family": 0.3700000000000001
+    },
+    "('tcp', 'rust', 'rtt128')": {
+      "wall_seconds": 0.5504639690043405,
+      "mib_s_one_direction": 0.33263842696406565,
+      "cpu_seconds_relay_family": 0.19,
+      "rtt_median_us": 329.60900000000004,
+      "rtt_p95_us": 383.281,
+      "rtt_p99_us": 436.173
+    },
+    "('tcp', 'rust', 'connect128')": {
+      "wall_seconds": 0.19817089301068336,
+      "mib_s_one_direction": 0.09239776133023168,
+      "cpu_seconds_relay_family": 0.08000000000000002,
+      "rtt_median_us": 942.496,
+      "rtt_p95_us": 1062.104,
+      "rtt_p99_us": 1276.11
+    },
+    "('tcp', 'rust', 'bulk1')": {
+      "wall_seconds": 0.46227194101084024,
+      "mib_s_one_direction": 138.44664649135433,
+      "cpu_seconds_relay_family": 0.19
+    },
+    "('tcp', 'rust', 'bulk16')": {
+      "wall_seconds": 1.1802495369920507,
+      "mib_s_one_direction": 108.45164178264966,
+      "cpu_seconds_relay_family": 0.46
+    },
+    "('tcp', 'socat', 'rtt128')": {
+      "wall_seconds": 0.551460483984556,
+      "mib_s_one_direction": 0.33203733371243327,
+      "cpu_seconds_relay_family": 0.2,
+      "rtt_median_us": 321.49350000000004,
+      "rtt_p95_us": 366.239,
+      "rtt_p99_us": 415.999
+    },
+    "('tcp', 'socat', 'connect128')": {
+      "wall_seconds": 0.41530482401140034,
+      "mib_s_one_direction": 0.044089415331465945,
+      "cpu_seconds_relay_family": 0.27999999999999997,
+      "rtt_median_us": 1589.3155000000002,
+      "rtt_p95_us": 1935.755,
+      "rtt_p99_us": 48372.832
+    },
+    "('tcp', 'socat', 'bulk1')": {
+      "wall_seconds": 0.5389484810293652,
+      "mib_s_one_direction": 118.74975485182394,
+      "cpu_seconds_relay_family": 0.22999999999999998
+    },
+    "('tcp', 'socat', 'bulk16')": {
+      "wall_seconds": 1.5063284629723057,
+      "mib_s_one_direction": 84.9748266373649,
+      "cpu_seconds_relay_family": 0.5900000000000001
+    },
+    "('tls12', 'rust', 'rtt128')": {
+      "wall_seconds": 0.7337673679576255,
+      "mib_s_one_direction": 0.2495415805416059,
+      "cpu_seconds_relay_family": 0.27,
+      "rtt_median_us": 413.99350000000004,
+      "rtt_p95_us": 493.368,
+      "rtt_p99_us": 552.688
+    },
+    "('tls12', 'rust', 'connect128')": {
+      "wall_seconds": 1.5914878550102003,
+      "mib_s_one_direction": 0.011505301041007719,
+      "cpu_seconds_relay_family": 0.5599999999999999,
+      "rtt_median_us": 9212.248,
+      "rtt_p95_us": 20225.718,
+      "rtt_p99_us": 23330.566
+    },
+    "('tls12', 'rust', 'bulk1')": {
+      "wall_seconds": 1.5741364060086198,
+      "mib_s_one_direction": 40.65721353988528,
+      "cpu_seconds_relay_family": 0.8099999999999999
+    },
+    "('tls12', 'rust', 'bulk16')": {
+      "wall_seconds": 4.017592498043086,
+      "mib_s_one_direction": 31.859876297147366,
+      "cpu_seconds_relay_family": 1.84
+    },
+    "('tls12', 'socat', 'rtt128')": {
+      "wall_seconds": 0.7514462710241787,
+      "mib_s_one_direction": 0.24367073975952747,
+      "cpu_seconds_relay_family": 0.27,
+      "rtt_median_us": 425.3745,
+      "rtt_p95_us": 530.521,
+      "rtt_p99_us": 569.525
+    },
+    "('tls12', 'socat', 'connect128')": {
+      "wall_seconds": 2.5071744570159353,
+      "mib_s_one_direction": 0.0073032599800786895,
+      "cpu_seconds_relay_family": 1.43,
+      "rtt_median_us": 14337.2415,
+      "rtt_p95_us": 29209.045,
+      "rtt_p99_us": 30790.366
+    },
+    "('tls12', 'socat', 'bulk1')": {
+      "wall_seconds": 1.7197616359917447,
+      "mib_s_one_direction": 37.21445964404989,
+      "cpu_seconds_relay_family": 0.8400000000000001
+    },
+    "('tls12', 'socat', 'bulk16')": {
+      "wall_seconds": 4.486101482005324,
+      "mib_s_one_direction": 28.53256898298764,
+      "cpu_seconds_relay_family": 2.2099999999999995
+    },
+    "('tls13', 'rust', 'rtt128')": {
+      "wall_seconds": 0.7192883460083976,
+      "mib_s_one_direction": 0.2545647649737707,
+      "cpu_seconds_relay_family": 0.27,
+      "rtt_median_us": 414.36249999999995,
+      "rtt_p95_us": 461.565,
+      "rtt_p99_us": 545.762
+    },
+    "('tls13', 'rust', 'connect128')": {
+      "wall_seconds": 1.59935645601945,
+      "mib_s_one_direction": 0.011448696634252574,
+      "cpu_seconds_relay_family": 0.55,
+      "rtt_median_us": 9119.8545,
+      "rtt_p95_us": 23668.894,
+      "rtt_p99_us": 27396.404
+    },
+    "('tls13', 'rust', 'bulk1')": {
+      "wall_seconds": 1.6177411380340345,
+      "mib_s_one_direction": 39.56133555321232,
+      "cpu_seconds_relay_family": 0.8199999999999998
+    },
+    "('tls13', 'rust', 'bulk16')": {
+      "wall_seconds": 4.081168748962227,
+      "mib_s_one_direction": 31.3635646731217,
+      "cpu_seconds_relay_family": 1.9
+    },
+    "('tls13', 'socat', 'rtt128')": {
+      "wall_seconds": 0.7374657490290701,
+      "mib_s_one_direction": 0.24829013278389173,
+      "cpu_seconds_relay_family": 0.26,
+      "rtt_median_us": 437.4755,
+      "rtt_p95_us": 508.024,
+      "rtt_p99_us": 568.138
+    },
+    "('tls13', 'socat', 'connect128')": {
+      "wall_seconds": 2.5874868109822273,
+      "mib_s_one_direction": 0.007076575925830205,
+      "cpu_seconds_relay_family": 1.49,
+      "rtt_median_us": 14564.3925,
+      "rtt_p95_us": 31888.773,
+      "rtt_p99_us": 33575.375
+    },
+    "('tls13', 'socat', 'bulk1')": {
+      "wall_seconds": 1.791865447012242,
+      "mib_s_one_direction": 35.71696753610248,
+      "cpu_seconds_relay_family": 0.8800000000000001
+    },
+    "('tls13', 'socat', 'bulk16')": {
+      "wall_seconds": 4.528501608991064,
+      "mib_s_one_direction": 28.265420011304357,
+      "cpu_seconds_relay_family": 2.21
+    }
+  },
+  "memory": [
+    {
+      "processes": 1,
+      "threads": 2,
+      "rss_mib": 4.81640625,
+      "pss_mib": 2.193359375,
+      "cpu_seconds": 0.01,
+      "fds": 75,
+      "private_mib": 2.11328125,
+      "mode": "tcp",
+      "implementation": "rust"
+    },
+    {
+      "processes": 33,
+      "threads": 33,
+      "rss_mib": 92.015625,
+      "pss_mib": 4.20703125,
+      "cpu_seconds": 0.01,
+      "fds": 230,
+      "private_mib": 2.07421875,
+      "mode": "tcp",
+      "implementation": "socat"
+    },
+    {
+      "processes": 1,
+      "threads": 2,
+      "rss_mib": 11.19140625,
+      "pss_mib": 8.751953125,
+      "cpu_seconds": 0.13,
+      "fds": 75,
+      "private_mib": 8.671875,
+      "mode": "tls12",
+      "implementation": "rust"
+    },
+    {
+      "processes": 33,
+      "threads": 33,
+      "rss_mib": 251.1640625,
+      "pss_mib": 33.4267578125,
+      "cpu_seconds": 0.01,
+      "fds": 230,
+      "private_mib": 27.96875,
+      "mode": "tls12",
+      "implementation": "socat"
+    },
+    {
+      "processes": 1,
+      "threads": 2,
+      "rss_mib": 11.19140625,
+      "pss_mib": 8.751953125,
+      "cpu_seconds": 0.13,
+      "fds": 75,
+      "private_mib": 8.671875,
+      "mode": "tls13",
+      "implementation": "rust"
+    },
+    {
+      "processes": 33,
+      "threads": 33,
+      "rss_mib": 250.765625,
+      "pss_mib": 34.21484375,
+      "cpu_seconds": 0.01,
+      "fds": 230,
+      "private_mib": 28.72265625,
+      "mode": "tls13",
+      "implementation": "socat"
+    }
+  ]
+}

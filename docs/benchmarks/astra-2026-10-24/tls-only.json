@@ -1,0 +1,19 @@
+{
+  "passed": 14,
+  "tests": [
+    "plain TCP preserved in TLS binary",
+    "independent Python TLS client to mTLS relay",
+    "independent TLSv1_2 handshake",
+    "independent TLSv1_3 handshake",
+    "TLS client/server mTLS bidirectional payload",
+    "outbound IP SAN verified",
+    "TLS on both legs",
+    "mTLS rejects missing client certificate",
+    "mTLS rejects plain TCP without upstream connection",
+    "outbound wrong DNS SAN fails closed",
+    "outbound unrelated CA fails closed",
+    "mTLS rejects untrusted client identity",
+    "inbound handshake timeout releases connection",
+    "non-TLS binary rejects TLS profile"
+  ]
+}

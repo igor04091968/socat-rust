@@ -1,0 +1,30 @@
+{
+  "passed": 25,
+  "checks": [
+    "rsa3072: key/CSR/self-signed PEM, permissions, SANs and lifetime",
+    "rsa3072: all commands refuse existing files without mutation",
+    "rsa3072: mTLS loopback + wrong SAN rejected / independent Python TLS",
+    "ecdsa-p256: key/CSR/self-signed PEM, permissions, SANs and lifetime",
+    "ecdsa-p256: all commands refuse existing files without mutation",
+    "ecdsa-p256: mTLS loopback + wrong SAN rejected / independent Python TLS",
+    "gost2012-256: key/CSR/self-signed PEM, permissions, SANs and lifetime",
+    "gost2012-256: all commands refuse existing files without mutation",
+    "gost2012-256: mTLS loopback + wrong SAN rejected / kuznyechik",
+    "gost2012-256: mTLS loopback + wrong SAN rejected / magma",
+    "gost2012-256: mTLS loopback + wrong SAN rejected / gost28147",
+    "gost2012-256: mTLS loopback + wrong SAN rejected / legacy28147",
+    "gost2012-512: key/CSR/self-signed PEM, permissions, SANs and lifetime",
+    "gost2012-512: all commands refuse existing files without mutation",
+    "TLS-only binary generates and signs ordinary TLS material",
+    "feature gates reject GOST in TLS-only and PKI in plain binaries",
+    "missing SAN and malformed/injected SANs are rejected before output",
+    "invalid certificate lifetime rejected",
+    "symlink and dangling-symlink outputs rejected",
+    "key input cannot be overwritten by certificate output",
+    "encrypted input fails without prompt or output",
+    "PKI rejects relay and daemon modes",
+    "client-only CSR can omit SAN",
+    "key generation needs no external openssl, engine DSO or config",
+    "concurrent writers yield one valid key and one refusal"
+  ]
+}

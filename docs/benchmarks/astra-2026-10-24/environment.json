@@ -1,0 +1,36 @@
+{
+  "date": "2026-10-24",
+  "os": "Astra Linux 1.8.6",
+  "kernel": "6.12.77-1-generic",
+  "architecture": "x86_64",
+  "logical_cpus": 6,
+  "ram_mib": 3911,
+  "python": "3.11.2",
+  "socat_rust": {
+    "version": "0.1.13",
+    "source_commit": "907bb9c41a726cf9f04dfb51bab8b3dd16f62ce8",
+    "binary": "socat-rust-linux-amd64-tls-gost-static",
+    "sha256": "5977d04a1df15691a2e69c70b84138fbb453df7322075049d649e035182b4fb5",
+    "openssl": "3.5.9"
+  },
+  "socat": {
+    "version": "1.8.0.2-1.astra1b1",
+    "source": "Astra Linux standard repository",
+    "openssl": "3.4.0"
+  },
+  "limits": {
+    "CPUQuota": "100%",
+    "CPUWeight": 10,
+    "Nice": 10,
+    "MemoryHigh": "384M",
+    "MemoryMax": "512M",
+    "MemorySwapMax": 0,
+    "TasksMax": 192,
+    "LimitNOFILE": 2048,
+    "RuntimeMaxSec": 600
+  },
+  "scope": "synthetic IPv4 loopback; no live client or production upstream traffic",
+  "repetitions": 3,
+  "measurements": 84,
+  "anonymization": "Hostname, account name, deployment paths and production process identities are omitted; numeric measurements are preserved."
+}

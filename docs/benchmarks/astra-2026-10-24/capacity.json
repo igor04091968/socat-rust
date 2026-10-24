@@ -1,0 +1,146 @@
+[
+  {
+    "implementation": "rust",
+    "configured_limit": 1,
+    "warm_half_close": false,
+    "backend_sessions_before": 1,
+    "backend_sessions_after": 1,
+    "three_extra_connections": [
+      "queued",
+      "queued",
+      "queued"
+    ]
+  },
+  {
+    "implementation": "rust",
+    "configured_limit": 1,
+    "warm_half_close": true,
+    "backend_sessions_before": 1,
+    "backend_sessions_after": 1,
+    "three_extra_connections": [
+      "queued",
+      "queued",
+      "queued"
+    ]
+  },
+  {
+    "implementation": "rust",
+    "configured_limit": 2,
+    "warm_half_close": false,
+    "backend_sessions_before": 2,
+    "backend_sessions_after": 2,
+    "three_extra_connections": [
+      "queued",
+      "queued",
+      "queued"
+    ]
+  },
+  {
+    "implementation": "rust",
+    "configured_limit": 2,
+    "warm_half_close": true,
+    "backend_sessions_before": 2,
+    "backend_sessions_after": 2,
+    "three_extra_connections": [
+      "queued",
+      "queued",
+      "queued"
+    ]
+  },
+  {
+    "implementation": "rust",
+    "configured_limit": 32,
+    "warm_half_close": false,
+    "backend_sessions_before": 32,
+    "backend_sessions_after": 32,
+    "three_extra_connections": [
+      "queued",
+      "queued",
+      "queued"
+    ]
+  },
+  {
+    "implementation": "rust",
+    "configured_limit": 32,
+    "warm_half_close": true,
+    "backend_sessions_before": 32,
+    "backend_sessions_after": 32,
+    "three_extra_connections": [
+      "queued",
+      "queued",
+      "queued"
+    ]
+  },
+  {
+    "implementation": "socat",
+    "configured_limit": 1,
+    "warm_half_close": false,
+    "backend_sessions_before": 1,
+    "backend_sessions_after": 1,
+    "three_extra_connections": [
+      "queued",
+      "queued",
+      "queued"
+    ]
+  },
+  {
+    "implementation": "socat",
+    "configured_limit": 1,
+    "warm_half_close": true,
+    "backend_sessions_before": 1,
+    "backend_sessions_after": 1,
+    "three_extra_connections": [
+      "queued",
+      "queued",
+      "queued"
+    ]
+  },
+  {
+    "implementation": "socat",
+    "configured_limit": 2,
+    "warm_half_close": false,
+    "backend_sessions_before": 2,
+    "backend_sessions_after": 2,
+    "three_extra_connections": [
+      "queued",
+      "queued",
+      "queued"
+    ]
+  },
+  {
+    "implementation": "socat",
+    "configured_limit": 2,
+    "warm_half_close": true,
+    "backend_sessions_before": 2,
+    "backend_sessions_after": 3,
+    "three_extra_connections": [
+      "admitted",
+      "queued",
+      "queued"
+    ]
+  },
+  {
+    "implementation": "socat",
+    "configured_limit": 32,
+    "warm_half_close": false,
+    "backend_sessions_before": 32,
+    "backend_sessions_after": 32,
+    "three_extra_connections": [
+      "queued",
+      "queued",
+      "queued"
+    ]
+  },
+  {
+    "implementation": "socat",
+    "configured_limit": 32,
+    "warm_half_close": true,
+    "backend_sessions_before": 32,
+    "backend_sessions_after": 33,
+    "three_extra_connections": [
+      "admitted",
+      "queued",
+      "queued"
+    ]
+  }
+]

@@ -1,0 +1,68 @@
+[
+  {
+    "processes": 1,
+    "threads": 2,
+    "rss_mib": 4.81640625,
+    "pss_mib": 2.193359375,
+    "cpu_seconds": 0.01,
+    "fds": 75,
+    "private_mib": 2.11328125,
+    "mode": "tcp",
+    "implementation": "rust"
+  },
+  {
+    "processes": 33,
+    "threads": 33,
+    "rss_mib": 92.015625,
+    "pss_mib": 4.20703125,
+    "cpu_seconds": 0.01,
+    "fds": 230,
+    "private_mib": 2.07421875,
+    "mode": "tcp",
+    "implementation": "socat"
+  },
+  {
+    "processes": 1,
+    "threads": 2,
+    "rss_mib": 11.19140625,
+    "pss_mib": 8.751953125,
+    "cpu_seconds": 0.13,
+    "fds": 75,
+    "private_mib": 8.671875,
+    "mode": "tls12",
+    "implementation": "rust"
+  },
+  {
+    "processes": 33,
+    "threads": 33,
+    "rss_mib": 251.1640625,
+    "pss_mib": 33.4267578125,
+    "cpu_seconds": 0.01,
+    "fds": 230,
+    "private_mib": 27.96875,
+    "mode": "tls12",
+    "implementation": "socat"
+  },
+  {
+    "processes": 1,
+    "threads": 2,
+    "rss_mib": 11.19140625,
+    "pss_mib": 8.751953125,
+    "cpu_seconds": 0.13,
+    "fds": 75,
+    "private_mib": 8.671875,
+    "mode": "tls13",
+    "implementation": "rust"
+  },
+  {
+    "processes": 33,
+    "threads": 33,
+    "rss_mib": 250.765625,
+    "pss_mib": 34.21484375,
+    "cpu_seconds": 0.01,
+    "fds": 230,
+    "private_mib": 28.72265625,
+    "mode": "tls13",
+    "implementation": "socat"
+  }
+]
