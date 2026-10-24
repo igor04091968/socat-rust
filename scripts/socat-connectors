@@ -1,0 +1,265 @@
+#!/usr/bin/python3
+"""Manage the configured bnk2450001..bnk2450037 relays through systemd."""
+import argparse
+import fcntl
+import os
+import json
+import select
+import signal
+import stat
+import time
+from pathlib import Path
+import subprocess
+import sys
+import tomllib
+
+CONFIG = Path("/etc/socat-rust/relays.toml")
+BINARY = "/usr/local/sbin/socat-rust"
+SYSTEMCTL = "/usr/bin/systemctl"
+LOCK = Path("/run/lock/socat-connectors.lock")
+PROC = Path("/proc")
+ACTIONS = ("list", "check", "start", "stop", "restart", "status", "enable", "disable")
+
+
+def select_relays(data, requested=None):
+    wanted = {f"bnk24500{i:02d}" for i in range(1, 38)}
+    selected = {}
+    for relay in data.get("relay", []):
+        name = relay.get("name")
+        if name not in wanted:
+            continue
+        if name in selected:
+            raise ValueError(f"Повторяющийся профиль: {name}")
+        selected[name] = relay
+    if requested:
+        if requested not in selected:
+            raise ValueError(f"Профиль отсутствует или вне диапазона 01–37: {requested}")
+        return [selected[requested]]
+    if not selected:
+        raise ValueError("В конфигурации нет профилей bnk2450001..bnk2450037")
+    return [selected[name] for name in sorted(selected)]
+
+
+def run(command, timeout=45):
+    result = subprocess.run(command, text=True, capture_output=True, timeout=timeout,
+                            env={**os.environ, "SYSTEMD_COLORS": "0", "SYSTEMD_PAGER": "cat"})
+    if result.returncode:
+        raise RuntimeError((result.stderr or result.stdout).strip()
+                           or f"Команда завершилась с кодом {result.returncode}")
+    return result.stdout
+
+
+def units_for(relays):
+    return [f"socat-rust@{relay['name']}.service" for relay in relays]
+
+
+def manual_process(relay):
+    """Return a verified manual daemon pidfd; never trust a PID file alone."""
+    path = Path(relay.get("pid_file", "/var/run/socat-rust/" + relay["name"] + ".lock"))
+    try:
+        lock_fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return None
+    process_fd = None
+    try:
+        info = os.fstat(lock_fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise RuntimeError(f"Необычный lock-файл: {path}")
+        raw = os.read(lock_fd, 64).strip()
+        if not raw.isdigit() or int(raw) <= 1:
+            return None
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            pass
+        else:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            return None
+        pid = int(raw)
+        try:
+            process_fd = os.pidfd_open(pid)
+            proc = PROC / str(pid)
+            if not os.path.samestat((proc / "exe").stat(), Path(BINARY).stat()):
+                return None
+            args = [os.fsdecode(a) for a in (proc / "cmdline").read_bytes().split(b"\0") if a]
+            options = {}
+            tokens = iter(args[1:])
+            for token in tokens:
+                if token == "--daemon":
+                    key, value = "daemon", True
+                elif token in ("--config", "-c", "--relay", "-r"):
+                    key = "config" if token in ("--config", "-c") else "relay"
+                    value = next(tokens, None)
+                else:
+                    return None
+                if key in options:
+                    return None
+                options[key] = value
+            if options != {"config": str(CONFIG), "relay": relay["name"], "daemon": True}:
+                return None
+            fields = dict(line.split(":", 1) for line in (proc / "status").read_text().splitlines() if ":" in line)
+            if any(int(v) != relay["uid"] for v in fields["Uid"].split()):
+                return None
+            for fd in (proc / "fd").iterdir():
+                try:
+                    owned = os.path.samestat(fd.stat(), info)
+                    details = (proc / "fdinfo" / fd.name).read_text() if owned else ""
+                    if owned and "FLOCK" in details and "WRITE" in details:
+                        result = (pid, process_fd)
+                        process_fd = None
+                        return result
+                except FileNotFoundError:
+                    continue
+        except ProcessLookupError:
+            return None
+        except FileNotFoundError:
+            return None
+        return None
+    finally:
+        if process_fd is not None:
+            os.close(process_fd)
+        os.close(lock_fd)
+
+
+def stop_manual(relays):
+    processes = []
+    try:
+        for relay in relays:
+            found = manual_process(relay)
+            if found:
+                processes.append((relay["name"], *found))
+        for name, pid, descriptor in processes:
+            try:
+                signal.pidfd_send_signal(descriptor, signal.SIGTERM)
+                print(f"{name}: SIGTERM ручному процессу PID={pid}")
+            except ProcessLookupError:
+                pass
+        deadline = time.monotonic() + 10
+        for name, pid, descriptor in processes:
+            poller = select.poll()
+            poller.register(descriptor, select.POLLIN)
+            remaining = max(0, int((deadline - time.monotonic()) * 1000))
+            if not poller.poll(remaining):
+                raise RuntimeError(f"{name}: PID={pid} не завершился за 10 секунд; SIGKILL не отправлен")
+        return len(processes)
+    finally:
+        for _, _, descriptor in processes:
+            os.close(descriptor)
+
+
+def ready_relays(relays):
+    addresses = json.loads(run(["/usr/sbin/ip", "-j", "-4", "address", "show"], timeout=10))
+    local = {"0.0.0.0"} | {addr["local"] for interface in addresses
+                             for addr in interface.get("addr_info", []) if "local" in addr}
+    ready, missing = [], []
+    for relay in relays:
+        host = relay["listen"].rsplit(":", 1)[0]
+        if host in local:
+            ready.append(relay)
+        else:
+            missing.append(relay)
+            print(f"ПРОПУСК {relay['name']}: адрес {host} отсутствует на сервере", file=sys.stderr)
+    return ready, missing
+
+
+def status(units, relays=None):
+    output = run([SYSTEMCTL, "show", *units, "--no-pager",
+                  "--property=Id,ActiveState,SubState,MainPID,NRestarts,UnitFileState"])
+    records = []
+    for block in output.strip().split("\n\n"):
+        record = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
+        if record:
+            records.append(record)
+    by_name = {r["name"]: r for r in (relays or [])}
+    manual_found = False
+    print(f"{'Профиль':14} {'Состояние':22} {'PID':8} {'Рестарты':9} Автозапуск")
+    for record in records:
+        name = record.get("Id", "?").removeprefix("socat-rust@").removesuffix(".service")
+        state = record.get("ActiveState", "?") + "/" + record.get("SubState", "?")
+        relay = by_name.get(name)
+        external = manual_process(relay) if relay and record.get("MainPID", "0") == "0" else None
+        if external:
+            pid, descriptor = external
+            os.close(descriptor)
+            state = "manual/running"
+            record["MainPID"] = str(pid)
+            manual_found = True
+        print(f"{name:14} {state:22} {record.get('MainPID', '?'):8} "
+              f"{record.get('NRestarts', '?'):9} {record.get('UnitFileState', '?')}")
+    return 0 if not manual_found and len(records) == len(units) and all(
+        r.get("ActiveState") == "active" and r.get("SubState") == "running"
+        and r.get("MainPID", "0") != "0" for r in records) else 1
+
+
+def control(action, relays):
+    units = units_for(relays)
+    if action in ("start", "stop", "restart", "enable", "disable"):
+        if os.geteuid() != 0:
+            raise PermissionError("Используйте sudo socat-connectors " + action)
+        with LOCK.open("a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise RuntimeError("Другая команда socat-connectors ещё выполняется") from None
+            if action in ("start", "restart"):
+                run([BINARY, "--config", str(CONFIG), "config-check"], timeout=15)
+            if action == "start":
+                for relay in relays:
+                    found = manual_process(relay)
+                    if found:
+                        pid, descriptor = found
+                        os.close(descriptor)
+                        raise RuntimeError(f"{relay['name']}: ручной процесс PID={pid}; "
+                                           "для перевода под systemd выполните restart "
+                                           "(соединения будут прерваны)")
+            if action in ("stop", "restart"):
+                run([SYSTEMCTL, "stop", *units, "--no-pager"])
+                count = stop_manual(relays)
+                print(f"Остановлены службы; ручных процессов завершено: {count}")
+                if action == "stop":
+                    return 0
+            if action in ("start", "restart"):
+                ready, missing = ready_relays(relays)
+                if ready:
+                    ready_units = units_for(ready)
+                    failed = run([SYSTEMCTL, "list-units", "--state=failed", "--plain",
+                                  "--no-legend", "--no-pager"])
+                    failed_names = {line.split()[0] for line in failed.splitlines() if line.split()}
+                    reset = [unit for unit in ready_units if unit in failed_names]
+                    if reset:
+                        run([SYSTEMCTL, "reset-failed", *reset])
+                    run([SYSTEMCTL, "start", *ready_units, "--no-pager"])
+                    time.sleep(0.3)
+                result = status(units, relays)
+                return 1 if missing else result
+            print(run([SYSTEMCTL, action, *units, "--no-pager"]), end="")
+        print(f"{action}: обработано профилей: {len(units)}")
+        return 0
+    return status(units, relays)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("action", choices=ACTIONS, nargs="?", default="status")
+    parser.add_argument("--relay", help="Один профиль, например bnk2450001")
+    args = parser.parse_args()
+    with CONFIG.open("rb") as stream:
+        data = tomllib.load(stream)
+    relays = select_relays(data, args.relay)
+    if args.action == "list":
+        for relay in relays:
+            print(relay["name"], relay["listen"], "uid=" + str(relay.get("uid")))
+        return 0
+    if args.action == "check":
+        print(run([BINARY, "--config", str(CONFIG), "config-check"], timeout=15), end="")
+        print(f"Группа управления: {len(relays)} профилей, диапазон 01–37.")
+        return 0
+    return control(args.action, relays)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
+        print(f"ОШИБКА: {error}", file=sys.stderr)
+        sys.exit(1)

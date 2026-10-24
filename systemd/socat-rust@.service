@@ -1,0 +1,26 @@
+[Unit]
+Description=socat-rust connector %i
+Documentation=file:/usr/local/share/doc/socat-connectors/README.md
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/socat-rust --config /etc/socat-rust/relays.toml --relay %i
+Restart=on-failure
+RestartSec=15s
+TimeoutStopSec=10s
+KillMode=control-group
+UMask=0027
+NoNewPrivileges=true
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LimitNOFILE=4096
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=socat-rust-%i
+
+[Install]
+WantedBy=multi-user.target
