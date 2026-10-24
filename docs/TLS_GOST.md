@@ -4,6 +4,10 @@ Version 0.1.12 adds independent inbound and outbound TLS endpoints. Profiles
 without either TLS table continue to relay TCP bytes, including end-to-end
 TLS encrypted by the original endpoints. No upgrade or protocol sniffing is used.
 
+For installation and launch examples, see [the Russian running guide](RUNNING_RU.md).
+Ordinary TLS negotiates 1.2/1.3; a configuration selector for a specific TLS
+version is not implemented. Restart the profile to apply configuration changes.
+
 ## Build features
 
 - No features: plain TCP binary. Any TLS configuration is rejected.
@@ -94,7 +98,7 @@ there is no repeated TLS downgrade/retry or replay of application payloads.
 
 ## Reproducible static Linux build
 
-Build on the notebook, not on gw2:
+Run from the repository root on a Linux x86_64 build host:
 
 ```sh
 bash scripts/fetch-tls-native.sh
