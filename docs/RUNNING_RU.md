@@ -1,6 +1,6 @@
 # Запуск socat-rust: TCP, TLS и ГОСТ
 
-Инструкция для Linux x86_64, выпуск v0.1.13. Один процесс обслуживает один
+Инструкция для Linux x86_64, выпуск v0.1.20. Один процесс обслуживает один
 профиль `[[relay]]`. Примеры используют тестовые адреса; замените их своими.
 
 С v0.1.13 в TLS-бинарниках также есть [встроенный генератор ключей, CSR и сертификатов](PKI_RU.md).
@@ -36,13 +36,13 @@ TCP-режим также может прозрачно передавать TLS
 В новом рабочем каталоге скачайте архив и контрольные суммы:
 
 ```bash
-release_url=https://github.com/igor04091968/socat-rust/releases/download/v0.1.13
+release_url=https://github.com/igor04091968/socat-rust/releases/download/v0.1.20
 curl -fL "$release_url/SHA256SUMS" -o SHA256SUMS
-curl -fL "$release_url/socat-rust-0.1.13-linux-amd64-tls-gost.tar.gz" \
-  -o socat-rust-0.1.13-linux-amd64-tls-gost.tar.gz
+curl -fL "$release_url/socat-rust-0.1.20-linux-amd64-tls-gost.tar.gz" \
+  -o socat-rust-0.1.20-linux-amd64-tls-gost.tar.gz
 sha256sum --ignore-missing -c SHA256SUMS
-tar -xzf socat-rust-0.1.13-linux-amd64-tls-gost.tar.gz
-cd socat-rust-0.1.13-linux-amd64-tls-gost
+tar -xzf socat-rust-0.1.20-linux-amd64-tls-gost.tar.gz
+cd socat-rust-0.1.20-linux-amd64-tls-gost
 sha256sum -c SHA256SUMS
 sudo install -m 0755 socat-rust-linux-amd64-tls-gost-static /usr/local/sbin/socat-rust
 sudo install -d -m 0755 /etc/socat-rust /var/log/socat-rust
@@ -68,6 +68,7 @@ pid_file = "/run/socat-rust/demo.lock"
 log_file = "/var/log/socat-rust/demo.log"
 backlog = 16
 max_connections = 4
+runtime_workers = 0 # авто: от 1 до 2, с учётом доступных CPU
 eof_grace_seconds = 1
 connect_timeout_seconds = 10
 verbose_payload_logging = false
@@ -81,9 +82,46 @@ verbose_payload_logging = false
 
 `listen` и `upstream` задаются числовыми IPv4-адресами с портом; DNS-имя
 в `upstream` не поддерживается. `allow` ограничивает адреса клиентов.
-`max_connections` задаёт число одновременно обслуживаемых соединений.
-Таймаут подключения действует на одну попытку; повторные TCP-подключения
-продолжаются с ограниченной задержкой между попытками.
+`max_connections` — верхний предел одновременно обслуживаемых соединений.
+В Tokio-сборке эффективный предел автоматически снижается с учётом RLIMIT_NOFILE,
+текущего числа открытых файлов, доступной памяти Linux и лимита cgroup v1/v2;
+проверка выполняется раз в секунду. По умолчанию резервируется 32 FD, 64 МиБ
+памяти и оценивается 1 МиБ на сессию. Эти оценки настраиваются в `[relay.resources]`:
+
+```toml
+[relay.resources]
+reserve_fds = 32
+reserve_memory_bytes = 67108864
+memory_per_connection_bytes = 1048576
+cpu_pressure_high_percent = 20
+```
+
+Нулевой вычисленный бюджет приостанавливает приём, а не запускает новые сессии;
+текущие соединения завершаются штатно. Когда ресурсы освобождаются, приём
+возобновляется автоматически. На системах без доступного счётчика памяти действует
+ограничение по FD и `max_connections`. При наличии Linux PSI CPU-давление cgroup
+(или системы, если cgroup PSI недоступен) снижает лимит новых соединений после
+трёх высоких измерений; возврат идёт ступенями после пяти спокойных измерений.
+При исчезновении метрики контроллер постепенно возвращает исходный лимит. Уже
+принятые сессии не завершаются из-за CPU-давления. Порог настраивается через
+`cpu_pressure_high_percent`; значение `0` выключает CPU-адаптацию. PSI недоступен
+на legacy-сборке и части старых ядер.
+
+`runtime_workers = 0` выбирает от 1 до 2
+Tokio worker-потоков по доступной параллельности; явное значение 1..64 фиксирует
+их число. Для множества профилей оставляйте авто или 1; TLS-нагрузку проверяйте
+измерением перед увеличением. Legacy-сборка для CentOS 5 эти лимиты не применяет.
+
+`connect_timeout_seconds` ограничивает одну попытку. После ошибки relay повторяет
+подключение с экспоненциальной задержкой до 30 секунд, но по умолчанию не дольше
+`upstream_retry_window_seconds = 300`; затем закрывает клиентскую сессию и
+освобождает слот. Значение `0` сохраняет бесконечные повторы. Окно учитывает
+таймаут текущей попытки и не удерживает слот дольше установленной границы.
+Все шаблонные профили и сгенерированные отдельные unit-файлы входят в общую
+systemd slice `socat-rust.slice`; она включает учёт, но не задаёт произвольных лимитов.
+Системный администратор может задать подходящие для узла `MemoryHigh`, `MemoryMax`
+и `CPUQuota` через drop-in `/etc/systemd/system/socat-rust.slice.d/resources.conf`.
+Нужно установить slice unit и затем выполнить `systemctl daemon-reload`.
 
 Проверка всех профилей без открытия сетевых сокетов и запуск в терминале:
 
@@ -152,6 +190,106 @@ handshake_timeout_seconds = 10
 Каждая сторона получает отдельную TLS-сессию; relay обрабатывает расшифрованные
 данные. Обычные поля профиля размещайте перед TLS-таблицами, иначе TOML
 отнесёт их к последней открытой таблице.
+
+## Процесс и терминал (exec/pty)
+
+Профиль с `endpoint = "exec"` запускает программу без shell и соединяет её
+stdin/stdout с расшифрованным клиентским потоком. `endpoint = "pty"` делает то
+же через псевдотерминал: работает job control, Ctrl-C, `stty`, полноэкранные
+программы. Оба режима требуют mTLS (`inbound_tls.client_ca`) и недоступны в
+`legacy-kernel`.
+
+```toml
+[[relay]]
+name = "console-demo"
+listen = "10.34.0.1:8090"
+allow = ["10.19.63.0/24"]
+endpoint = "pty"
+uid = 2450090
+max_connections = 1
+log_file = "/var/log/console-demo.log"
+
+[relay.inbound_tls]
+mode = "tls"
+certificate = "/etc/socat-rust/pki/demo/server-chain.pem"
+private_key = "/etc/socat-rust/pki/demo/server.key"
+client_ca = "/etc/socat-rust/pki/demo/client-ca.pem"
+
+[relay.process]
+command = "/bin/bash"
+args = ["-i", "-l"]
+working_directory = "/var/lib/socat-rust/console-demo"
+environment = { TERM = "xterm-256color", HOME = "/var/lib/socat-rust/console-demo" }
+stderr = "client"
+start_timeout_seconds = 5
+idle_timeout_seconds = 900
+terminate_grace_seconds = 5
+max_duration_seconds = 28800
+max_processes = 64
+terminal = { rows = 24, columns = 80, term = "xterm-256color" }
+```
+
+Поля `process`:
+
+- `command` — абсолютный путь, `args` — массив без разбора shell-строки;
+- `environment` — полная замена окружения (PATH по умолчанию системный),
+  переменные не наследуются;
+- `stderr` — `log` (по умолчанию), `client` или `discard`; у PTY stderr процесса
+  объединён с терминальным потоком и всегда идёт клиенту;
+- `working_directory` — рабочий каталог (абсолютный путь);
+- `start_timeout_seconds` — максимальное измеренное время `Command::spawn()`;
+  вызов синхронный и не прерывается таймером; превышение закрывает сессию после возврата;
+- `idle_timeout_seconds` — простой до завершения, `0` — без ограничения;
+- `max_duration_seconds` — предел жизни сессии, `0` — без ограничения;
+- `max_processes` — `RLIMIT_NPROC` для UID (учитывается суммарно по UID,
+  поэтому профилю нужен отдельный UID; под root ядро может не применять лимит);
+- `terminal` — только для `pty`; `term` задаёт `TERM`, явный `environment.TERM`
+  должен совпадать. Если HOME не задан, PTY берёт его из `/etc/passwd`.
+
+Процесс запускается в отдельной группе (pty — в отдельной сессии с
+управляющим терминалом). При обрыве клиента, `SIGTERM` сервису, простое или
+истечении `max_duration_seconds` процессу даётся `terminate_grace_seconds` на
+штатный выход, затем всей группе посылается `SIGTERM`, ещё через
+`terminate_grace_seconds` — `SIGKILL`. Фоновые задания не переживают лидера.
+Зомби и fd на `/dev/ptmx` не остаются.
+
+### Консольный клиент
+
+`console` — интерактивный клиент к pty-профилю: передаёт нажатия, размер окна
+и печатает вывод. Сертификаты берутся из флагов или из профиля `--relay`.
+
+```bash
+socat-rust console 10.34.0.1:8090 --relay console-demo \
+  --ca /etc/socat-rust/pki/demo/client-ca.pem \
+  --cert /etc/socat-rust/pki/demo/client.pem \
+  --key /etc/socat-rust/pki/demo/client.key
+```
+
+Выход из шелла закрывает сессию; код выхода процесса возвращается как код
+`socat-rust console`. Протокол версионирован префиксом `\0SRC1`; клиент,
+который его не присылает, получает прозрачный поток.
+
+### Требования и ограничения
+
+- сервису нужны `/dev/ptmx` и `/dev/pts` (при `PrivateDevices=true` добавьте
+  `DeviceAllow=/dev/ptmx rw` и `DeviceAllow=/dev/pts/* rw`);
+- `NoNewPrivileges=true` в юните не даёт `su`/`sudo` повысить права —
+  шелл работает от UID сервиса; для root-консоли запускайте профиль под root
+  или без `NoNewPrivileges`;
+- `ProtectHome=true` скрывает `/home`; задайте `working_directory` и `HOME`
+  вне домашних каталогов (юнит разрешает запись в `/var/lib/socat-rust`,
+  `/run` и `/var/log`);
+- число одновременных сессий ограничивает `max_connections`, дерево процессов —
+  `max_processes`, время — `max_duration_seconds` и `idle_timeout_seconds`;
+- в журнал пишутся метаданные (pid, причина завершения, код/сигнал), но не
+  содержимое сессии, если не включён `verbose_payload_logging`.
+
+### Откат
+
+Старый бинарник и конфиг сохраняйте рядом (`socat-rust.old`, `relays.toml.bak`).
+Откат: вернуть файлы, `systemctl restart socat-rust@<профиль>`, проверить
+журнал и реальное подключение. Профили без `endpoint` продолжают работать как
+TCP и после обновления.
 
 ## ГОСТ TLS
 
@@ -222,6 +360,7 @@ sudo ss -ltnp 'sport = :18000'
 ```bash
 tar -xzf source.tar.gz
 cd socat-rust-0.1.13
+sudo install -m 0644 systemd/socat-rust.slice /etc/systemd/system/
 sudo install -m 0644 systemd/socat-rust@.service /etc/systemd/system/
 sudo install -d -m 0755 /usr/local/share/doc/socat-connectors
 sudo install -m 0644 docs/ASTRA_CONNECTORS.md /usr/local/share/doc/socat-connectors/README.md
@@ -250,7 +389,8 @@ relay на том же адресе и порту.
 
 Старый `scripts/generate-systemd-units.py` создаёт отдельную схему с именами
 `socat-rust-<name>.service`, другим путём бинарника и запуском от UID через
-systemd. Она не взаимозаменяема с приведённым шаблоном `@`.
+systemd. Она не взаимозаменяема с приведённым шаблоном `@`. Для неё также установите
+`systemd/socat-rust.slice`, чтобы сгенерированные процессы попали в общий cgroup.
 
 ## Группа банковских коннекторов
 

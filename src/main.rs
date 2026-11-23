@@ -1,7 +1,13 @@
 #![cfg_attr(feature = "legacy-kernel", allow(dead_code, unused_imports))]
 
 mod advice;
+#[cfg(all(not(feature = "legacy-kernel"), feature = "tls"))]
+mod console;
+mod endpoint;
+mod framing;
 mod pki;
+mod resources;
+mod session;
 mod transport;
 
 use std::{
@@ -19,12 +25,10 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use ipnet::IpNet;
 use serde::Deserialize;
-use tokio::{
-    io::{AsyncRead, AsyncWrite, AsyncWriteExt},
-    net::{TcpSocket, TcpStream},
-    sync::Semaphore,
-    time::{sleep, timeout},
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use tokio::net::{TcpSocket, TcpStream};
+#[cfg(test)]
+use tokio::time::timeout;
 use tracing::{error, info, warn};
 
 #[derive(Debug, Parser)]
@@ -142,6 +146,23 @@ enum Command {
         #[command(subcommand)]
         command: pki::Command,
     },
+    /// Подключиться к PTY-профилю как к локальной консоли.
+    Console {
+        /// Адрес relay в виде host:port.
+        address: String,
+        /// Корневой сертификат CA.
+        #[arg(long)]
+        ca: Option<PathBuf>,
+        /// Клиентский сертификат mTLS.
+        #[arg(long)]
+        cert: Option<PathBuf>,
+        /// Ключ клиентского сертификата.
+        #[arg(long)]
+        key: Option<PathBuf>,
+        /// Имя из сертификата сервера (по умолчанию — хост из адреса).
+        #[arg(long)]
+        server_name: Option<String>,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -154,13 +175,24 @@ struct Config {
 struct RelayConfig {
     name: String,
     #[serde(default)]
+    resources: resources::Config,
+    #[serde(default)]
+    runtime_workers: usize,
+    #[serde(default)]
     advice: advice::Config,
     #[serde(default)]
     inbound_tls: Option<transport::InboundTls>,
     #[serde(default)]
     outbound_tls: Option<transport::OutboundTls>,
     listen: String,
-    upstream: String,
+    /// tcp (по умолчанию), exec или pty. При отсутствии выводится из
+    /// наличия upstream/process.
+    #[serde(default)]
+    endpoint: Option<endpoint::Kind>,
+    #[serde(default)]
+    upstream: Option<String>,
+    #[serde(default)]
+    process: Option<endpoint::Process>,
     #[serde(default)]
     allow: Vec<IpNet>,
     #[serde(default = "default_backlog")]
@@ -175,6 +207,8 @@ struct RelayConfig {
     upstream_keepalive: KeepaliveConfig,
     #[serde(default)]
     connect_timeout_seconds: u64,
+    #[serde(default = "default_upstream_retry_window_seconds")]
+    upstream_retry_window_seconds: u64,
     #[serde(default)]
     verbose_payload_logging: bool,
     #[serde(default)]
@@ -225,8 +259,81 @@ fn default_eof_grace_seconds() -> u64 {
     1
 }
 
+fn default_upstream_retry_window_seconds() -> u64 {
+    300
+}
+
 impl RelayConfig {
+    /// Разрешает endpoint и проверяет противоречия. Отсутствие поля
+    /// выводится из конфигурации: upstream — tcp, process — exec.
+    fn kind(&self) -> Result<endpoint::Kind> {
+        use endpoint::Kind;
+        match (self.endpoint, self.upstream.as_ref(), self.process.as_ref()) {
+            (Some(Kind::Tcp), Some(_), None) => Ok(Kind::Tcp),
+            (Some(Kind::Tcp), None, None) => {
+                bail!("{}: endpoint = tcp требует upstream", self.name)
+            }
+            (Some(Kind::Tcp), _, Some(_)) => {
+                bail!("{}: endpoint = tcp несовместим с process", self.name)
+            }
+            (Some(kind @ (Kind::Exec | Kind::Pty)), None, Some(_)) => Ok(kind),
+            (Some(kind @ (Kind::Exec | Kind::Pty)), Some(_), _) => bail!(
+                "{}: для endpoint = {} задайте process без upstream",
+                self.name,
+                kind.as_str()
+            ),
+            (Some(kind @ (Kind::Exec | Kind::Pty)), None, None) => bail!(
+                "{}: endpoint = {} требует process",
+                self.name,
+                kind.as_str()
+            ),
+            (None, Some(_), None) => Ok(Kind::Tcp),
+            (None, Some(_), Some(_)) => bail!(
+                "{}: upstream и process заданы одновременно; выберите endpoint",
+                self.name
+            ),
+            (None, None, Some(_)) => Ok(Kind::Exec),
+            (None, None, None) => bail!("{}: нужен upstream или process", self.name),
+        }
+    }
+
+    fn upstream(&self) -> Result<&str> {
+        self.upstream
+            .as_deref()
+            .with_context(|| format!("{}: upstream не задан", self.name))
+    }
+
+    fn target(&self) -> Result<String> {
+        Ok(match self.kind()? {
+            endpoint::Kind::Tcp => format!("upstream {}", self.upstream()?),
+            kind => format!(
+                "{} {}",
+                kind.as_str(),
+                self.process
+                    .as_ref()
+                    .map(|process| process.command.display().to_string())
+                    .unwrap_or_default()
+            ),
+        })
+    }
+
     fn validate(&self) -> Result<()> {
+        #[cfg(not(feature = "legacy-kernel"))]
+        {
+            self.resources.validate()?;
+            if self.runtime_workers > 64 {
+                bail!(
+                    "{}: runtime_workers должен быть в диапазоне 0..=64",
+                    self.name
+                );
+            }
+        }
+        if self.upstream_retry_window_seconds > 86_400 {
+            bail!(
+                "{}: upstream_retry_window_seconds должен быть 0..=86400 (0 — без ограничения)",
+                self.name
+            );
+        }
         self.advice.validate()?;
         self.advice
             .validate_initial_timeout(if self.connect_timeout_seconds == 0 {
@@ -261,9 +368,51 @@ impl RelayConfig {
                 self.name
             );
         }
-        self.upstream
-            .parse::<std::net::SocketAddr>()
-            .with_context(|| format!("неверный адрес upstream для {}", self.name))?;
+        let kind = self.kind()?;
+        if let Some(upstream) = &self.upstream {
+            upstream
+                .parse::<std::net::SocketAddr>()
+                .with_context(|| format!("неверный адрес upstream для {}", self.name))?;
+        }
+        if let Some(process) = &self.process {
+            process.validate(kind)?;
+        }
+        if kind != endpoint::Kind::Tcp {
+            // Читаем поле и в сборках без TLS, чтобы не было dead_code.
+            let _ = self
+                .inbound_tls
+                .as_ref()
+                .and_then(|tls| tls.client_ca.as_ref());
+            #[cfg(feature = "legacy-kernel")]
+            bail!(
+                "{}: endpoint = {} не поддерживается legacy-сборкой",
+                self.name,
+                kind.as_str()
+            );
+            #[cfg(all(not(feature = "legacy-kernel"), not(feature = "tls")))]
+            bail!(
+                "{}: endpoint = {} требует сборку с feature tls",
+                self.name,
+                kind.as_str()
+            );
+            #[cfg(all(not(feature = "legacy-kernel"), feature = "tls"))]
+            {
+                let tls = self.inbound_tls.as_ref().with_context(|| {
+                    format!(
+                        "{}: endpoint = {} требует inbound_tls",
+                        self.name,
+                        kind.as_str()
+                    )
+                })?;
+                if tls.client_ca.is_none() {
+                    bail!(
+                        "{}: endpoint = {} требует mTLS (inbound_tls.client_ca)",
+                        self.name,
+                        kind.as_str()
+                    );
+                }
+            }
+        }
         if self.backlog == 0 || self.backlog > 65535 {
             bail!("{}: backlog должен быть от 1 до 65535", self.name);
         }
@@ -460,7 +609,7 @@ fn init_logging(
                 .with_writer(writer)
                 .try_init()
                 .map_err(|error| anyhow!("инициализировать файловый журнал: {error}"))?;
-            return Ok(None);
+            Ok(None)
         }
 
         #[cfg(not(feature = "legacy-kernel"))]
@@ -501,6 +650,25 @@ fn entrypoint(cli: Cli) -> Result<()> {
         }
         return pki::run(command);
     }
+    #[cfg(not(feature = "legacy-kernel"))]
+    if let Some(Command::Console {
+        address,
+        ca,
+        cert,
+        key,
+        server_name,
+    }) = &cli.command
+    {
+        return console_main(
+            &cli.config,
+            cli.relay.as_deref(),
+            address,
+            ca,
+            cert,
+            key,
+            server_name,
+        );
+    }
     #[cfg(feature = "legacy-kernel")]
     {
         legacy_main(cli)
@@ -511,14 +679,98 @@ fn entrypoint(cli: Cli) -> Result<()> {
     }
 }
 
+#[cfg(all(not(feature = "legacy-kernel"), feature = "tls"))]
+#[allow(clippy::too_many_arguments)]
+fn console_main(
+    config_path: &Path,
+    relay: Option<&str>,
+    address: &str,
+    ca: &Option<PathBuf>,
+    cert: &Option<PathBuf>,
+    key: &Option<PathBuf>,
+    server_name: &Option<String>,
+) -> Result<()> {
+    let supplied = [ca.is_some(), cert.is_some(), key.is_some()];
+    if supplied.iter().any(|value| *value) && !supplied.iter().all(|value| *value) {
+        bail!("задайте --ca, --cert и --key вместе либо не задавайте ни один");
+    }
+    let (ca, cert, key) = match (ca, cert, key) {
+        (Some(ca), Some(cert), Some(key)) => (ca.clone(), cert.clone(), key.clone()),
+        _ => {
+            let name = relay.context("--relay обязателен, если не заданы --ca/--cert/--key")?;
+            let config = load_config(config_path)?;
+            let profile = config
+                .relay
+                .into_iter()
+                .find(|item| item.name == name)
+                .with_context(|| format!("профиль relay не найден: {name}"))?;
+            let tls = profile
+                .inbound_tls
+                .context("у профиля нет inbound_tls с клиентским сертификатом")?;
+            (
+                tls.client_ca.context("в inbound_tls нет client_ca")?,
+                tls.certificate,
+                tls.private_key,
+            )
+        }
+    };
+    let server_name = server_name.clone().unwrap_or_else(|| {
+        address
+            .rsplit_once(':')
+            .map(|(host, _)| host.to_string())
+            .unwrap_or_else(|| address.to_string())
+    });
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("создать Tokio runtime консоли")?;
+    let code = runtime.block_on(console::run(console::Options {
+        address: address.to_string(),
+        ca,
+        certificate: cert,
+        private_key: key,
+        server_name,
+    }))?;
+    std::process::exit(code);
+}
+
+#[cfg(all(not(feature = "legacy-kernel"), not(feature = "tls")))]
+#[allow(clippy::too_many_arguments)]
+fn console_main(
+    _config_path: &Path,
+    _relay: Option<&str>,
+    _address: &str,
+    _ca: &Option<PathBuf>,
+    _cert: &Option<PathBuf>,
+    _key: &Option<PathBuf>,
+    _server_name: &Option<String>,
+) -> Result<()> {
+    bail!("команда console требует сборку с feature tls")
+}
+
 #[cfg(not(feature = "legacy-kernel"))]
 fn async_main(cli: Cli) -> Result<()> {
     let config = load_config(&cli.config)?;
     if matches!(cli.command, Some(Command::ConfigCheck)) {
         for relay in &config.relay {
+            let target = match relay.kind()? {
+                endpoint::Kind::Tcp => format!("upstream={}", relay.upstream()?),
+                kind => format!(
+                    "endpoint={} command={}",
+                    kind.as_str(),
+                    relay
+                        .process
+                        .as_ref()
+                        .map(|process| process.command.display().to_string())
+                        .unwrap_or_default()
+                ),
+            };
             println!(
-                "ПРОВЕРЕНО: {} listen={} upstream={}",
-                relay.name, relay.listen, relay.upstream
+                "ПРОВЕРЕНО: {} listen={} {} runtime_workers={}",
+                relay.name,
+                relay.listen,
+                target,
+                resources::runtime_workers(relay.runtime_workers)
             );
         }
         return Ok(());
@@ -538,7 +790,10 @@ fn async_main(cli: Cli) -> Result<()> {
     // firewall-правил, которые различают трафик банкоматов по UID процесса.
     apply_configured_uid(&relay)?;
     let _log_guard = init_logging(&relay)?;
+    let worker_threads = resources::runtime_workers(relay.runtime_workers);
+    info!(relay = %relay.name, worker_threads, "настройка Tokio runtime");
     let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(worker_threads)
         .enable_all()
         .build()
         .context("создать Tokio runtime")?;
@@ -551,12 +806,17 @@ fn async_main(cli: Cli) -> Result<()> {
 
 #[cfg(feature = "legacy-kernel")]
 fn legacy_main(cli: Cli) -> Result<()> {
+    if matches!(cli.command, Some(Command::Console { .. })) {
+        bail!("команда console не поддерживается legacy-сборкой");
+    }
     let config = load_config(&cli.config)?;
     if matches!(cli.command, Some(Command::ConfigCheck)) {
         for relay in &config.relay {
             println!(
                 "ПРОВЕРЕНО: {} listen={} upstream={}",
-                relay.name, relay.listen, relay.upstream
+                relay.name,
+                relay.listen,
+                relay.upstream()?
             );
         }
         return Ok(());
@@ -613,7 +873,7 @@ fn legacy_run_relay(relay: RelayConfig) -> Result<()> {
         .set_nonblocking(false)
         .context("включить blocking-режим listener")?;
     let active = std::sync::Arc::new(AtomicUsize::new(0));
-    info!(relay = %relay.name, listen = %relay.listen, upstream = %relay.upstream, "legacy relay слушает входящий порт");
+    info!(relay = %relay.name, listen = %relay.listen, upstream = relay.upstream()?, "legacy relay слушает входящий порт");
     for incoming in listener.incoming() {
         let client = incoming.context("принять клиентское соединение")?;
         let peer = client.peer_addr().context("получить адрес клиента")?;
@@ -690,21 +950,42 @@ fn legacy_handle_connection(
 
 #[cfg(feature = "legacy-kernel")]
 fn legacy_connect_forever(relay: &RelayConfig) -> Result<std::net::TcpStream> {
-    let address: std::net::SocketAddr = relay.upstream.parse()?;
+    let upstream = relay.upstream()?;
+    let address: std::net::SocketAddr = upstream.parse()?;
     let timeout = std::time::Duration::from_secs(if relay.connect_timeout_seconds == 0 {
         10
     } else {
         relay.connect_timeout_seconds
     });
     let mut delay = std::time::Duration::from_secs(1);
+    let started_at = std::time::Instant::now();
     loop {
-        match std::net::TcpStream::connect_timeout(&address, timeout) {
+        let remaining = endpoint::tcp::retry_time_remaining(
+            relay.upstream_retry_window_seconds,
+            started_at.elapsed(),
+        );
+        if remaining.is_some_and(|remaining| remaining.is_zero()) {
+            bail!(
+                "relay {}: upstream {} недоступен дольше {} секунд; завершаем клиентскую сессию и освобождаем ресурсы",
+                relay.name,
+                upstream,
+                relay.upstream_retry_window_seconds
+            );
+        }
+        let attempt_timeout = remaining.map(|left| left.min(timeout)).unwrap_or(timeout);
+        match std::net::TcpStream::connect_timeout(&address, attempt_timeout) {
             Ok(stream) => return Ok(stream),
             Err(error) => {
-                warn!(relay = %relay.name, upstream = %relay.upstream, %error, "ошибка подключения к upstream; повторная попытка")
+                warn!(relay = %relay.name, upstream, %error, "ошибка подключения к upstream; повторная попытка")
             }
         }
-        std::thread::sleep(delay);
+        let sleep_for = endpoint::tcp::retry_time_remaining(
+            relay.upstream_retry_window_seconds,
+            started_at.elapsed(),
+        )
+        .map(|left| left.min(delay))
+        .unwrap_or(delay);
+        std::thread::sleep(sleep_for);
         delay = (delay * 2).min(std::time::Duration::from_secs(30));
     }
 }
@@ -793,8 +1074,41 @@ fn legacy_copy(
     }
 }
 
+struct ActiveConnection(Arc<AtomicUsize>);
+
+impl Drop for ActiveConnection {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+fn refresh_resource_budget(
+    relay: &RelayConfig,
+    active_connections: usize,
+    previous: resources::Snapshot,
+    cpu: &mut resources::CpuPressureController,
+) -> resources::Snapshot {
+    let mut current =
+        resources::snapshot(relay.max_connections, active_connections, &relay.resources);
+    let cpu_pressure = resources::cpu_pressure_percent();
+    current.effective_connections = cpu.apply(
+        current.effective_connections,
+        cpu_pressure,
+        relay.resources.cpu_pressure_high_percent,
+    );
+    if current.effective_connections != previous.effective_connections {
+        info!(relay = %relay.name,
+            max_connections = relay.max_connections,
+            effective_connections = current.effective_connections,
+            fd_connections = current.fd_connections,
+            memory_connections = ?current.memory_connections,
+            cpu_pressure_percent = ?cpu_pressure,
+            "обновлён лимит соединений по ресурсам узла");
+    }
+    current
+}
+
 async fn run_relay(relay: RelayConfig) -> Result<()> {
-    #[cfg(feature = "tls")]
     let tls_runtime = Arc::new(transport::Runtime::build(
         relay.inbound_tls.as_ref(),
         relay.outbound_tls.as_ref(),
@@ -813,10 +1127,25 @@ async fn run_relay(relay: RelayConfig) -> Result<()> {
     let listener = socket
         .listen(relay.backlog)
         .with_context(|| format!("запустить прослушивание {}", relay.listen))?;
-    let slots = Arc::new(Semaphore::new(relay.max_connections));
-    info!(relay = %relay.name, listen = %relay.listen, upstream = %relay.upstream,
-        max_connections = relay.max_connections, backlog = relay.backlog,
-        "relay слушает входящий порт");
+    let active = Arc::new(AtomicUsize::new(0));
+    let mut cpu_controller = resources::CpuPressureController::default();
+    let mut resource_budget = resources::snapshot(relay.max_connections, 0, &relay.resources);
+    let initial_cpu_pressure = resources::cpu_pressure_percent();
+    resource_budget.effective_connections = cpu_controller.apply(
+        resource_budget.effective_connections,
+        initial_cpu_pressure,
+        relay.resources.cpu_pressure_high_percent,
+    );
+    info!(relay = %relay.name, listen = %relay.listen, target = %relay.target()?,
+        max_connections = relay.max_connections,
+        effective_connections = resource_budget.effective_connections,
+        fd_connections = resource_budget.fd_connections,
+        memory_connections = ?resource_budget.memory_connections,
+        cpu_pressure_percent = ?initial_cpu_pressure,
+        backlog = relay.backlog, "relay слушает входящий порт");
+    let mut resource_refresh = tokio::time::interval(Duration::from_secs(1));
+    resource_refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    resource_refresh.tick().await;
 
     let configured_timeout = if relay.connect_timeout_seconds == 0 {
         10
@@ -834,21 +1163,32 @@ async fn run_relay(relay: RelayConfig) -> Result<()> {
     reporting.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let advice_enabled = relay.advice.mode != advice::Mode::Off;
     let mut shutdown = Box::pin(shutdown_signal());
+    let mut connections = tokio::task::JoinSet::new();
     loop {
-        if slots.available_permits() == 0 {
+        while connections.try_join_next().is_some() {}
+        if resource_budget.effective_connections == 0
+            || active.load(Ordering::Acquire) >= resource_budget.effective_connections
+        {
             tokio::select! {
                 _ = &mut shutdown => break,
                 _ = reporting.tick(), if advice_enabled => {
                     monitor.report(&relay.name, configured_timeout);
                     continue;
                 }
-                _ = sleep(Duration::from_millis(100)) => continue,
+                _ = resource_refresh.tick() => {
+                    resource_budget = refresh_resource_budget(&relay, active.load(Ordering::Acquire), resource_budget, &mut cpu_controller);
+                    continue;
+                }
             }
         }
         let (client, peer) = tokio::select! {
             _ = &mut shutdown => break,
             _ = reporting.tick(), if advice_enabled => {
                 monitor.report(&relay.name, configured_timeout);
+                continue;
+            }
+            _ = resource_refresh.tick() => {
+                resource_budget = refresh_resource_budget(&relay, active.load(Ordering::Acquire), resource_budget, &mut cpu_controller);
                 continue;
             }
             accepted = listener.accept() => accepted.context("принять клиентское соединение")?,
@@ -860,35 +1200,31 @@ async fn run_relay(relay: RelayConfig) -> Result<()> {
             drop(client);
             continue;
         }
-        let permit = match slots.clone().try_acquire_owned() {
-            Ok(permit) => permit,
-            Err(_) => {
-                warn!(relay = %relay.name, peer = %peer, "клиент отклонён: достигнут лимит соединений");
-                drop(client);
-                continue;
-            }
-        };
+        if active.load(Ordering::Acquire) >= resource_budget.effective_connections {
+            warn!(relay = %relay.name, peer = %peer, "клиент отклонён: достигнут текущий ресурсный лимит");
+            drop(client);
+            continue;
+        }
+        active.fetch_add(1, Ordering::AcqRel);
+        let active_guard = ActiveConnection(Arc::clone(&active));
         let profile = relay.clone();
-        #[cfg(feature = "tls")]
         let tls_runtime = tls_runtime.clone();
         let monitor = monitor.clone();
-        tokio::spawn(async move {
-            let _permit = permit;
-            let result = handle_connection(
-                profile,
-                client,
-                peer,
-                monitor.clone(),
-                #[cfg(feature = "tls")]
-                tls_runtime,
-            )
-            .await;
+        connections.spawn(async move {
+            let _active_guard = active_guard;
+            let result =
+                handle_connection(profile, client, peer, monitor.clone(), tls_runtime).await;
             monitor.session(result.is_ok());
             if let Err(error) = result {
                 warn!(peer = %peer, error = %error, "соединение relay завершилось с ошибкой");
             }
         });
     }
+    // Сначала убить группы процессов, затем отменить задачи: иначе
+    // освобождение сессий успеет убрать группы из реестра.
+    session::stop_all_groups().await;
+    connections.abort_all();
+    while connections.join_next().await.is_some() {}
     info!(relay = %relay.name, "приёмник relay остановлен");
     Ok(())
 }
@@ -916,158 +1252,16 @@ async fn handle_connection(
     client: TcpStream,
     peer: std::net::SocketAddr,
     monitor: Arc<advice::Monitor>,
-    #[cfg(feature = "tls")] tls_runtime: Arc<transport::Runtime>,
+    tls_runtime: Arc<transport::Runtime>,
 ) -> Result<()> {
-    configure_keepalive(&client, &relay.client_keepalive)?;
+    endpoint::tcp::configure_keepalive(&client, &relay.client_keepalive)?;
     info!(relay = %relay.name, peer = %peer, "клиент подключён");
-    // Authenticate the incoming TLS client before touching the upstream.
-    #[cfg(feature = "tls")]
+    // TLS и mTLS завершаются до запуска процесса и подключения к upstream.
     let client = tls_runtime.accept(client).await?;
-    let (upstream, _policy_generation) = connect_forever(&relay, &monitor).await?;
-    configure_keepalive(&upstream, &relay.upstream_keepalive)?;
-    #[cfg(feature = "tls")]
-    let upstream = {
-        let started = std::time::Instant::now();
-        let result = tls_runtime.connect(upstream).await;
-        if relay.outbound_tls.is_some() {
-            monitor.tls_attempt(started.elapsed(), result.is_ok(), _policy_generation);
-        }
-        result?
-    };
-    #[cfg(feature = "tls")]
-    let (client_reader, client_writer) = tokio::io::split(client);
-    #[cfg(feature = "tls")]
-    let (upstream_reader, upstream_writer) = tokio::io::split(upstream);
-    #[cfg(not(feature = "tls"))]
-    let (client_reader, client_writer) = client.into_split();
-    #[cfg(not(feature = "tls"))]
-    let (upstream_reader, upstream_writer) = upstream.into_split();
-    let mut client_to_upstream = tokio::spawn(relay_direction(
-        client_reader,
-        upstream_writer,
-        relay.verbose_payload_logging,
-        "клиент -> upstream",
-    ));
-    let mut upstream_to_client = tokio::spawn(relay_direction(
-        upstream_reader,
-        client_writer,
-        relay.verbose_payload_logging,
-        "upstream -> клиент",
-    ));
-    tokio::select! {
-        result = &mut client_to_upstream => {
-            info!(relay = %relay.name, peer = %peer, direction = "клиент -> upstream", "направление завершилось; ожидается ответная сторона в пределах EOF grace");
-            if timeout(Duration::from_secs(relay.eof_grace_seconds), &mut upstream_to_client).await.is_err() {
-                warn!(relay = %relay.name, peer = %peer, grace_seconds = relay.eof_grace_seconds, "EOF grace истёк; закрываем upstream и клиентскую стороны");
-                upstream_to_client.abort();
-                // Дождаться отмены важно: пока задача не уничтожена, принадлежащая
-                // ей половина TcpStream удерживает исходящее TCP-соединение.
-                let _ = upstream_to_client.await;
-            }
-            result.context("задача клиент -> upstream")?.context("копирование клиент -> upstream")?;
-        }
-        result = &mut upstream_to_client => {
-            info!(relay = %relay.name, peer = %peer, direction = "upstream -> клиент", "направление завершилось; ожидается клиентская сторона в пределах EOF grace");
-            if timeout(Duration::from_secs(relay.eof_grace_seconds), &mut client_to_upstream).await.is_err() {
-                warn!(relay = %relay.name, peer = %peer, grace_seconds = relay.eof_grace_seconds, "EOF grace истёк; закрываем клиентскую и upstream стороны");
-                client_to_upstream.abort();
-                let _ = client_to_upstream.await;
-            }
-            result.context("задача upstream -> клиент")?.context("копирование upstream -> клиент")?;
-        }
-    }
+    let session = endpoint::open(&relay, &monitor, &tls_runtime).await?;
+    session.run(client, &relay, peer).await?;
     info!(relay = %relay.name, peer = %peer, "соединение relay закрыто");
     Ok(())
-}
-
-async fn connect_forever(
-    relay: &RelayConfig,
-    monitor: &advice::Monitor,
-) -> Result<(TcpStream, u64)> {
-    let mut delay = Duration::from_secs(1);
-    loop {
-        let (timeout_seconds, policy_generation) = monitor.timeout_policy();
-        let started = std::time::Instant::now();
-        match timeout(
-            Duration::from_secs(timeout_seconds),
-            TcpStream::connect(&relay.upstream),
-        )
-        .await
-        {
-            Ok(Ok(stream)) => {
-                monitor.tcp_attempt(started.elapsed(), true, false, policy_generation);
-                info!(relay = %relay.name, upstream = %relay.upstream, tcp_timeout_seconds = timeout_seconds, policy_generation, "upstream подключён");
-                return Ok((stream, policy_generation));
-            }
-            Ok(Err(error)) => {
-                monitor.tcp_attempt(started.elapsed(), false, false, policy_generation);
-                warn!(relay = %relay.name, upstream = %relay.upstream, %error, "ошибка подключения к upstream; повторная попытка")
-            }
-            Err(_) => {
-                monitor.tcp_attempt(started.elapsed(), false, true, policy_generation);
-                warn!(relay = %relay.name, upstream = %relay.upstream, timeout_seconds, "истёк тайм-аут подключения к upstream; повторная попытка")
-            }
-        }
-        sleep(delay).await;
-        delay = (delay * 2).min(Duration::from_secs(30));
-    }
-}
-
-fn configure_keepalive(stream: &TcpStream, config: &KeepaliveConfig) -> Result<()> {
-    if !config.enabled {
-        return Ok(());
-    }
-    let socket = socket2::SockRef::from(stream);
-    let keepalive = socket2::TcpKeepalive::new()
-        .with_time(Duration::from_secs(config.idle_seconds))
-        .with_interval(Duration::from_secs(config.interval_seconds))
-        .with_retries(config.count);
-    socket
-        .set_tcp_keepalive(&keepalive)
-        .context("настроить TCP keepalive")?;
-    Ok(())
-}
-
-async fn relay_copy<R, W>(
-    reader: &mut R,
-    writer: &mut W,
-    verbose: bool,
-    direction: &'static str,
-) -> Result<u64>
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-{
-    let mut buffer = [0_u8; 16 * 1024];
-    let mut total = 0_u64;
-    loop {
-        let count = tokio::io::AsyncReadExt::read(reader, &mut buffer).await?;
-        if count == 0 {
-            return Ok(total);
-        }
-        tokio::io::AsyncWriteExt::write_all(writer, &buffer[..count]).await?;
-        total += count as u64;
-        if verbose {
-            info!(direction, bytes = count, payload = %String::from_utf8_lossy(&buffer[..count]), "данные relay");
-        } else {
-            tracing::debug!(direction, bytes = count, "передача данных relay");
-        }
-    }
-}
-
-async fn relay_direction<R, W>(
-    mut reader: R,
-    mut writer: W,
-    verbose: bool,
-    direction: &'static str,
-) -> Result<u64>
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-{
-    let result = relay_copy(&mut reader, &mut writer, verbose, direction).await;
-    let _ = writer.shutdown().await;
-    result
 }
 
 #[cfg(test)]
@@ -1094,6 +1288,39 @@ mod tests {
         let denied: IpAddr = "10.19.64.10".parse().unwrap();
         assert!(network.contains(&allowed));
         assert!(!network.contains(&denied));
+    }
+
+    #[test]
+    fn retry_window_validation_allows_zero_and_caps_at_one_day() {
+        let mut config: Config = toml::from_str(
+            r#"[[relay]]
+name = "validation"
+listen = "127.0.0.1:12345"
+upstream = "127.0.0.1:12346""#,
+        )
+        .unwrap();
+        config.relay[0].upstream_retry_window_seconds = 0;
+        assert!(config.relay[0].validate().is_ok());
+        config.relay[0].upstream_retry_window_seconds = 86_400;
+        assert!(config.relay[0].validate().is_ok());
+        config.relay[0].upstream_retry_window_seconds = 86_401;
+        assert!(config.relay[0].validate().is_err());
+    }
+
+    #[test]
+    fn retry_window_can_be_unbounded_and_never_sleeps_past_deadline() {
+        assert_eq!(
+            endpoint::tcp::retry_time_remaining(0, Duration::from_secs(999)),
+            None
+        );
+        assert_eq!(
+            endpoint::tcp::retry_time_remaining(30, Duration::from_secs(12)),
+            Some(Duration::from_secs(18))
+        );
+        assert_eq!(
+            endpoint::tcp::retry_time_remaining(30, Duration::from_secs(31)),
+            Some(Duration::ZERO)
+        );
     }
 
     #[test]
@@ -1130,14 +1357,12 @@ mod tests {
             "#
         );
         let relay = toml::from_str::<Config>(&raw).unwrap().relay.remove(0);
-        #[cfg(feature = "tls")]
         let tls_runtime = Arc::new(transport::Runtime::build(None, None).unwrap());
         let task = tokio::spawn(handle_connection(
             relay,
             client_relay,
             "127.0.0.1:12345".parse().unwrap(),
             Arc::new(advice::Monitor::new(advice::Config::default())),
-            #[cfg(feature = "tls")]
             tls_runtime,
         ));
         let (mut upstream_peer, _) = timeout(Duration::from_secs(2), upstream_listener.accept())
@@ -1161,5 +1386,122 @@ mod tests {
             .expect("relay remained alive beyond EOF grace")
             .unwrap()
             .unwrap();
+    }
+
+    #[test]
+    fn endpoint_is_inferred_and_conflicts_are_rejected() {
+        let tcp: Config = toml::from_str(
+            r#"[[relay]]
+name = "tcp"
+listen = "127.0.0.1:1"
+upstream = "127.0.0.1:2""#,
+        )
+        .unwrap();
+        assert_eq!(tcp.relay[0].kind().unwrap(), endpoint::Kind::Tcp);
+
+        let exec: Config = toml::from_str(
+            r#"[[relay]]
+name = "exec"
+listen = "127.0.0.1:1"
+[relay.process]
+command = "/bin/cat""#,
+        )
+        .unwrap();
+        assert_eq!(exec.relay[0].kind().unwrap(), endpoint::Kind::Exec);
+
+        for raw in [
+            r#"[[relay]]
+name = "both"
+listen = "127.0.0.1:1"
+upstream = "127.0.0.1:2"
+[relay.process]
+command = "/bin/cat""#,
+            r#"[[relay]]
+name = "neither"
+listen = "127.0.0.1:1""#,
+            r#"[[relay]]
+name = "tcp-process"
+listen = "127.0.0.1:1"
+endpoint = "tcp"
+[relay.process]
+command = "/bin/cat""#,
+            r#"[[relay]]
+name = "exec-upstream"
+listen = "127.0.0.1:1"
+endpoint = "exec"
+upstream = "127.0.0.1:2""#,
+            r#"[[relay]]
+name = "pty-no-process"
+listen = "127.0.0.1:1"
+endpoint = "pty""#,
+        ] {
+            let config: Config = toml::from_str(raw).unwrap();
+            assert!(config.relay[0].kind().is_err(), "{raw}");
+        }
+    }
+
+    #[test]
+    fn process_contract_rejects_relative_command_and_exec_terminal() {
+        let relative: Config = toml::from_str(
+            r#"[[relay]]
+name = "relative"
+listen = "127.0.0.1:1"
+[relay.process]
+command = "cat""#,
+        )
+        .unwrap();
+        assert!(
+            relative.relay[0]
+                .process
+                .as_ref()
+                .unwrap()
+                .validate(endpoint::Kind::Exec)
+                .is_err()
+        );
+
+        let terminal: Config = toml::from_str(
+            r#"[[relay]]
+name = "terminal"
+listen = "127.0.0.1:1"
+[relay.process]
+command = "/bin/cat"
+[relay.process.terminal]
+rows = 40"#,
+        )
+        .unwrap();
+        let process = terminal.relay[0].process.as_ref().unwrap();
+        assert!(process.validate(endpoint::Kind::Exec).is_err());
+        assert!(process.validate(endpoint::Kind::Pty).is_ok());
+    }
+
+    #[cfg(feature = "tls")]
+    #[test]
+    fn exec_requires_client_certificate() {
+        let without_ca: Config = toml::from_str(
+            r#"[[relay]]
+name = "console"
+listen = "127.0.0.1:1"
+[relay.inbound_tls]
+certificate = "server.pem"
+private_key = "server.key"
+[relay.process]
+command = "/bin/cat""#,
+        )
+        .unwrap();
+        assert!(without_ca.relay[0].validate().is_err());
+
+        let with_ca: Config = toml::from_str(
+            r#"[[relay]]
+name = "console"
+listen = "127.0.0.1:1"
+[relay.inbound_tls]
+certificate = "server.pem"
+private_key = "server.key"
+client_ca = "ca.pem"
+[relay.process]
+command = "/bin/cat""#,
+        )
+        .unwrap();
+        assert!(with_ca.relay[0].validate().is_ok());
     }
 }

@@ -13,6 +13,7 @@ eof_grace_seconds = 1
 # Exact mapping of the currently deployed socat command:
 # -t1 => EOF grace 1 second; -v => payload logging enabled.
 connect_timeout_seconds = 10
+upstream_retry_window_seconds = 300 # 0 — повторять без ограничения
 verbose_payload_logging = true
 log_file = "/var/log/bnk2450034.log"
 
@@ -27,6 +28,12 @@ enabled = true
 idle_seconds = 150
 interval_seconds = 60
 count = 2
+
+[relay.resources]
+reserve_fds = 32
+reserve_memory_bytes = 67108864
+memory_per_connection_bytes = 1048576
+cpu_pressure_high_percent = 20
 
 [[relay]]
 name = "bnk2450001"
@@ -845,3 +852,56 @@ enabled = true
 idle_seconds = 150
 interval_seconds = 60
 count = 2
+
+# Процесс без терминала: mTLS обязателен, окружение не наследуется.
+[[relay]]
+name = "exec-demo"
+listen = "10.34.0.1:8090"
+allow = ["10.19.63.0/24"]
+endpoint = "exec"
+uid = 2450090
+max_connections = 1
+log_file = "/var/log/exec-demo.log"
+
+[relay.inbound_tls]
+mode = "tls"
+certificate = "/etc/socat-rust/pki/demo/server-chain.pem"
+private_key = "/etc/socat-rust/pki/demo/server.key"
+client_ca = "/etc/socat-rust/pki/demo/client-ca.pem"
+
+[relay.process]
+command = "/usr/bin/id"
+args = ["-a"]
+stderr = "client"
+idle_timeout_seconds = 60
+max_duration_seconds = 300
+max_processes = 32
+
+# Терминал: нужен endpoint = "pty" и terminal; клиент — `socat-rust console`.
+[[relay]]
+name = "console-demo"
+listen = "10.34.0.1:8091"
+allow = ["10.19.63.0/24"]
+endpoint = "pty"
+uid = 2450091
+max_connections = 1
+log_file = "/var/log/console-demo.log"
+
+[relay.inbound_tls]
+mode = "tls"
+certificate = "/etc/socat-rust/pki/demo/server-chain.pem"
+private_key = "/etc/socat-rust/pki/demo/server.key"
+client_ca = "/etc/socat-rust/pki/demo/client-ca.pem"
+
+[relay.process]
+command = "/bin/bash"
+args = ["-i", "-l"]
+working_directory = "/var/lib/socat-rust/console-demo"
+environment = { TERM = "xterm-256color", HOME = "/var/lib/socat-rust/console-demo" }
+stderr = "client"
+start_timeout_seconds = 5
+idle_timeout_seconds = 900
+terminate_grace_seconds = 5
+max_duration_seconds = 28800
+max_processes = 64
+terminal = { rows = 24, columns = 80, term = "xterm-256color" }

@@ -2,6 +2,14 @@
 use anyhow::{Result, bail};
 use serde::Deserialize;
 use std::path::PathBuf;
+use tokio::io::{AsyncRead, AsyncWrite};
+#[cfg(not(feature = "tls"))]
+use tokio::net::TcpStream;
+
+/// Общий тип потока для TLS и PTY. Без feature tls это обычный TCP-сокет.
+pub trait Io: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> Io for T {}
+pub type Stream = Box<dyn Io>;
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -21,6 +29,7 @@ pub enum GostCipher {
     Legacy28147,
 }
 
+#[cfg(feature = "tls")]
 impl GostCipher {
     pub fn openssl_name(self) -> &'static str {
         match self {
@@ -129,16 +138,8 @@ mod enabled {
         SslVerifyMode, SslVersion,
     };
     use std::{pin::Pin, sync::Arc, time::Duration};
-    use tokio::{
-        io::{AsyncRead, AsyncWrite},
-        net::TcpStream,
-        time::timeout,
-    };
+    use tokio::{net::TcpStream, time::timeout};
     use tokio_openssl::SslStream;
-
-    pub trait Io: AsyncRead + AsyncWrite + Unpin + Send {}
-    impl<T: AsyncRead + AsyncWrite + Unpin + Send> Io for T {}
-    pub type Stream = Box<dyn Io>;
 
     #[derive(Clone, Default)]
     pub struct Runtime {
@@ -338,6 +339,25 @@ mod enabled {
     #[cfg(not(feature = "tls-gost"))]
     fn initialize_gost() -> Result<()> {
         bail!("GOST is not compiled in");
+    }
+}
+
+#[cfg(not(feature = "tls"))]
+#[derive(Clone, Default)]
+pub struct Runtime;
+
+#[cfg(not(feature = "tls"))]
+impl Runtime {
+    pub fn build(_inbound: Option<&InboundTls>, _outbound: Option<&OutboundTls>) -> Result<Self> {
+        Ok(Self)
+    }
+
+    pub async fn accept(&self, stream: TcpStream) -> Result<Stream> {
+        Ok(Box::new(stream))
+    }
+
+    pub async fn connect(&self, stream: TcpStream) -> Result<Stream> {
+        Ok(Box::new(stream))
     }
 }
 

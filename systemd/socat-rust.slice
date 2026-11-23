@@ -1,0 +1,6 @@
+[Unit]
+Description=Shared resource accounting for socat-rust relays
+
+[Slice]
+CPUAccounting=yes
+MemoryAccounting=yes

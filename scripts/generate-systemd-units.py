@@ -14,6 +14,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+Slice=socat-rust.slice
 Type=simple
 User={uid}
 Group={uid}
