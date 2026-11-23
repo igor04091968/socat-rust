@@ -13,7 +13,7 @@ Linux x86_64; для старых ядер есть отдельный TCP-ва�
 предварительная сборка. Расширение проверенной совместимости с российскими
 дистрибутивами Linux и FreeBSD — одно из главных направлений развития.
 
-[Скачать v0.1.20](https://github.com/igor04091968/socat-rust/releases/tag/v0.1.20)
+[Скачать v0.1.21](https://github.com/igor04091968/socat-rust/releases/tag/v0.1.21)
 · [Установка и запуск](docs/RUNNING_RU.md)
 · [TLS и ГОСТ](docs/TLS_GOST.md)
 · [Генерация ключей и сертификатов](docs/PKI_RU.md)
