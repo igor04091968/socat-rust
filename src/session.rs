@@ -2,7 +2,7 @@
 //! дочерним процессом. Клиентский поток передаётся уже после TLS и ACL.
 use anyhow::{Context, Result, bail};
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     sync::{
         Arc, LazyLock,
         atomic::{AtomicU64, Ordering},
@@ -21,16 +21,19 @@ use crate::{RelayConfig, endpoint, framing, transport};
 
 /// Реестр групп процессов активных сессий: нужен для остановки службы,
 /// чтобы не оставлять потомков shell после SIGTERM.
-static GROUPS: LazyLock<std::sync::Mutex<HashSet<i32>>> =
-    LazyLock::new(|| std::sync::Mutex::new(HashSet::new()));
+static GROUPS: LazyLock<std::sync::Mutex<HashMap<i32, Duration>>> =
+    LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
 pub struct ProcessGroup(i32);
 
 impl ProcessGroup {
-    pub fn register(pid: Option<u32>) -> Self {
+    pub fn register(pid: Option<u32>, grace: Duration) -> Self {
         let id = pid.unwrap_or(0) as i32;
         if id > 0 {
-            GROUPS.lock().expect("реестр групп процессов").insert(id);
+            GROUPS
+                .lock()
+                .expect("реестр групп процессов")
+                .insert(id, grace);
         }
         Self(id)
     }
@@ -49,36 +52,44 @@ impl Drop for ProcessGroup {
 
 /// Принудительно завершает все группы процессов (вызывается при остановке).
 pub async fn stop_all_groups() {
-    let groups: Vec<i32> = GROUPS
+    let groups: Vec<(i32, Duration)> = GROUPS
         .lock()
         .expect("реестр групп процессов")
         .iter()
-        .copied()
+        .map(|(pid, grace)| (*pid, *grace))
         .collect();
-    let mut children = Vec::new();
-    for id in &groups {
-        if *id > 0 {
-            children.extend(descendants(*id));
-            // SAFETY: id is a positive registered process group.
-            unsafe { libc::kill(-*id, libc::SIGTERM) };
+    let mut tasks = tokio::task::JoinSet::new();
+    for (id, grace) in groups {
+        if id <= 0 {
+            continue;
         }
+        tasks.spawn(async move {
+            tokio::time::sleep(grace).await;
+            if !GROUPS
+                .lock()
+                .expect("реестр групп процессов")
+                .contains_key(&id)
+            {
+                return;
+            }
+            let children = descendants(id);
+            // SAFETY: id is a positive registered process group.
+            unsafe { libc::kill(-id, libc::SIGTERM) };
+            for pid in children {
+                // SAFETY: pid was read from the registered process tree in /proc.
+                unsafe { libc::kill(pid, libc::SIGTERM) };
+            }
+            tokio::time::sleep(grace).await;
+            if GROUPS
+                .lock()
+                .expect("реестр групп процессов")
+                .contains_key(&id)
+            {
+                kill_tree(id);
+            }
+        });
     }
-    children.sort_unstable();
-    children.dedup();
-    for pid in &children {
-        // SAFETY: pid was read from the registered process tree in /proc.
-        unsafe { libc::kill(*pid, libc::SIGTERM) };
-    }
-    if !groups.is_empty() {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-    }
-    for id in groups {
-        kill_tree(id);
-    }
-    for pid in children {
-        // SAFETY: terminate any descendant still alive after the grace period.
-        unsafe { libc::kill(pid, libc::SIGKILL) };
-    }
+    while tasks.join_next().await.is_some() {}
 }
 
 /// Потомки по /proc. Интерактивный shell с job control создаёт отдельные
@@ -310,7 +321,7 @@ async fn run_process(
             let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
             while filled < probe.len() && matches {
                 let wait_for = if filled == 0 {
-                    Duration::from_millis(300)
+                    Duration::from_secs(1)
                 } else {
                     deadline.saturating_duration_since(tokio::time::Instant::now())
                 };

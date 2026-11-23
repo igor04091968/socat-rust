@@ -158,8 +158,8 @@ pub async fn open(relay: &RelayConfig) -> Result<Session> {
     if let Some(home) = home {
         command.env("HOME", home);
     }
-    command.envs(&process.environment);
     command.env("TERM", &terminal.term);
+    command.envs(&process.environment);
     command
         .stdin(Stdio::from(stdin))
         .stdout(Stdio::from(stdout))
@@ -203,7 +203,10 @@ pub async fn open(relay: &RelayConfig) -> Result<Session> {
         "PTY-процесс запущен"
     );
     Ok(Session::Process(Box::new(ProcessSession {
-        group: crate::session::ProcessGroup::register(child.id()),
+        group: crate::session::ProcessGroup::register(
+            child.id(),
+            Duration::from_secs(process.terminate_grace_seconds),
+        ),
         child,
         stdin: None,
         stdout: None,

@@ -25,9 +25,14 @@ TimeoutStopSec=10s
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
+StateDirectory=socat-rust
+RuntimeDirectory=socat-rust
+RuntimeDirectoryMode=0750
+ProtectProc=invisible
 ProtectHome=true
 RestrictAddressFamilies=AF_INET AF_INET6
 ReadWritePaths=/var/log/socat-rust
+ReadWritePaths=/run/socat-rust
 LimitNOFILE=4096
 
 [Install]

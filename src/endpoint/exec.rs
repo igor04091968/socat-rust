@@ -68,7 +68,10 @@ pub async fn open(relay: &RelayConfig) -> Result<Session> {
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     Ok(Session::Process(Box::new(ProcessSession {
-        group: crate::session::ProcessGroup::register(child.id()),
+        group: crate::session::ProcessGroup::register(
+            child.id(),
+            Duration::from_secs(process.terminate_grace_seconds),
+        ),
         child,
         stdin,
         stdout,

@@ -205,9 +205,10 @@ pub fn apply_process_limit(command: &mut tokio::process::Command, max_processes:
                 return Err(std::io::Error::last_os_error());
             }
             let current = current.assume_init();
+            let capped = limit.min(current.rlim_max);
             let rlimit = libc::rlimit {
-                rlim_cur: limit.min(current.rlim_max),
-                rlim_max: current.rlim_max,
+                rlim_cur: capped,
+                rlim_max: capped,
             };
             if libc::setrlimit(libc::RLIMIT_NPROC, &rlimit) < 0 {
                 return Err(std::io::Error::last_os_error());
